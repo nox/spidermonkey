@@ -1,0 +1,588 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ricky Stewart <rstewart@mozilla.com>
+Date: Thu, 27 Feb 2020 16:22:21 +0000
+Subject: [PATCH] Bug 1617303 - mozbuild/backend/recursivemake.py and
+ /fastermake.py support Python 3 r=firefox-build-system-reviewers,mshal
+
+Differential Revision: https://phabricator.services.mozilla.com/D63880
+
+--HG--
+extra : moz-landing-system : lando
+
+diff --git a/python/mozbuild/mozbuild/backend/base.py b/python/mozbuild/mozbuild/backend/base.py
+index 6e274b09e391..9545e7b9ed1c 100644
+--- a/python/mozbuild/mozbuild/backend/base.py
++++ b/python/mozbuild/mozbuild/backend/base.py
+@@ -12,6 +12,7 @@ from abc import (
+ import errno
+ import itertools
+ import os
++import six
+ import time
+ 
+ from contextlib import contextmanager
+@@ -311,7 +312,7 @@ class BuildBackend(LoggingMixin):
+         srcdir = mozpath.dirname(obj.input_path)
+         pp.context.update({
+             k: ' '.join(v) if isinstance(v, list) else v
+-            for k, v in obj.config.substs.iteritems()
++            for k, v in six.iteritems(obj.config.substs)
+         })
+         pp.context.update(
+             top_srcdir=obj.topsrcdir,
+diff --git a/python/mozbuild/mozbuild/backend/common.py b/python/mozbuild/mozbuild/backend/common.py
+index dd8df396868a..aa5b15401df5 100644
+--- a/python/mozbuild/mozbuild/backend/common.py
++++ b/python/mozbuild/mozbuild/backend/common.py
+@@ -7,6 +7,7 @@ from __future__ import absolute_import, print_function, unicode_literals
+ import itertools
+ import json
+ import os
++import six
+ 
+ from collections import defaultdict
+ 
+@@ -99,7 +100,7 @@ class XPIDLManager(object):
+ 
+         The stem of an IDL file is the basename of the file with no .idl extension.
+         """
+-        return itertools.chain(*[m.stems() for m in self.modules.itervalues()])
++        return itertools.chain(*[m.stems() for m in six.itervalues(self.modules)])
+ 
+ 
+ class BinariesCollection(object):
+diff --git a/python/mozbuild/mozbuild/backend/fastermake.py b/python/mozbuild/mozbuild/backend/fastermake.py
+index 2b2fc7110e5a..0ff48f0a8bc9 100644
+--- a/python/mozbuild/mozbuild/backend/fastermake.py
++++ b/python/mozbuild/mozbuild/backend/fastermake.py
+@@ -4,6 +4,8 @@
+ 
+ from __future__ import absolute_import, unicode_literals, print_function
+ 
++import six
++
+ from mozbuild.backend.base import PartialBackend
+ from mozbuild.backend.make import MakeBackend
+ from mozbuild.frontend.context import ObjDirPath
+@@ -182,7 +184,7 @@ class FasterMakeBackend(MakeBackend, PartialBackend):
+         # Add information for chrome manifest generation
+         manifest_targets = []
+ 
+-        for target, entries in self._manifest_entries.iteritems():
++        for target, entries in six.iteritems(self._manifest_entries):
+             manifest_targets.append(target)
+             install_target = mozpath.basedir(target, install_manifests_bases)
+             self._install_manifests[install_target].add_content(
+@@ -194,7 +196,7 @@ class FasterMakeBackend(MakeBackend, PartialBackend):
+                          % ' '.join(self._install_manifests.keys()))
+ 
+         # Add dependencies we inferred:
+-        for target, deps in self._dependencies.iteritems():
++        for target, deps in six.iteritems(self._dependencies):
+             mk.create_rule([target]).add_dependencies(
+                 '$(TOPOBJDIR)/%s' % d for d in deps)
+ 
+@@ -205,7 +207,7 @@ class FasterMakeBackend(MakeBackend, PartialBackend):
+             '$(TOPSRCDIR)/third_party/python/compare-locales/compare_locales/paths.py',
+         ]
+         # Add l10n dependencies we inferred:
+-        for target, deps in self._l10n_dependencies.iteritems():
++        for target, deps in six.iteritems(self._l10n_dependencies):
+             mk.create_rule([target]).add_dependencies(
+                 '%s' % d[0] for d in deps)
+             for (merge, ref_file, l10n_file) in deps:
+@@ -224,7 +226,7 @@ class FasterMakeBackend(MakeBackend, PartialBackend):
+ 
+         mk.add_statement('include $(TOPSRCDIR)/config/faster/rules.mk')
+ 
+-        for base, install_manifest in self._install_manifests.iteritems():
++        for base, install_manifest in six.iteritems(self._install_manifests):
+             with self._write_file(
+                     mozpath.join(self.environment.topobjdir, 'faster',
+                                  'install_%s' % base.replace('/', '_'))) as fh:
+@@ -234,7 +236,7 @@ class FasterMakeBackend(MakeBackend, PartialBackend):
+         # for consumption by |mach watch|.
+         if self.environment.is_artifact_build:
+             unified_manifest = InstallManifest()
+-            for base, install_manifest in self._install_manifests.iteritems():
++            for base, install_manifest in six.iteritems(self._install_manifests):
+                 # Expect 'dist/bin/**', which includes 'dist/bin' with no trailing slash.
+                 assert base.startswith('dist/bin')
+                 base = base[len('dist/bin'):]
+diff --git a/python/mozbuild/mozbuild/backend/recursivemake.py b/python/mozbuild/mozbuild/backend/recursivemake.py
+index d5c4cf9c1ca1..e78b1b84a246 100644
+--- a/python/mozbuild/mozbuild/backend/recursivemake.py
++++ b/python/mozbuild/mozbuild/backend/recursivemake.py
+@@ -7,12 +7,13 @@ from __future__ import absolute_import, print_function, unicode_literals
+ import logging
+ import os
+ import re
++import six
+ 
+ from collections import (
+     defaultdict,
+     namedtuple,
+ )
+-from StringIO import StringIO
++from six import StringIO
+ from itertools import chain
+ 
+ from mozpack.manifests import (
+@@ -84,74 +85,74 @@ from ..makeutil import Makefile
+ from mozbuild.shellutil import quote as shell_quote
+ 
+ MOZBUILD_VARIABLES = [
+-    b'ASFLAGS',
+-    b'CMSRCS',
+-    b'CMMSRCS',
+-    b'CPP_UNIT_TESTS',
+-    b'DIRS',
+-    b'DIST_INSTALL',
+-    b'EXTRA_DSO_LDOPTS',
+-    b'EXTRA_JS_MODULES',
+-    b'EXTRA_PP_COMPONENTS',
+-    b'EXTRA_PP_JS_MODULES',
+-    b'FORCE_SHARED_LIB',
+-    b'FORCE_STATIC_LIB',
+-    b'FINAL_LIBRARY',
+-    b'HOST_CFLAGS',
+-    b'HOST_CSRCS',
+-    b'HOST_CMMSRCS',
+-    b'HOST_CXXFLAGS',
+-    b'HOST_EXTRA_LIBS',
+-    b'HOST_LIBRARY_NAME',
+-    b'HOST_PROGRAM',
+-    b'HOST_SIMPLE_PROGRAMS',
+-    b'JAR_MANIFEST',
+-    b'JAVA_JAR_TARGETS',
+-    b'LIBRARY_NAME',
+-    b'LIBS',
+-    b'MAKE_FRAMEWORK',
+-    b'MODULE',
+-    b'NO_DIST_INSTALL',
+-    b'NO_EXPAND_LIBS',
+-    b'NO_INTERFACES_MANIFEST',
+-    b'OS_LIBS',
+-    b'PARALLEL_DIRS',
+-    b'PREF_JS_EXPORTS',
+-    b'PROGRAM',
+-    b'RESOURCE_FILES',
+-    b'SHARED_LIBRARY_LIBS',
+-    b'SHARED_LIBRARY_NAME',
+-    b'SIMPLE_PROGRAMS',
+-    b'SONAME',
+-    b'STATIC_LIBRARY_NAME',
+-    b'TEST_DIRS',
+-    b'TOOL_DIRS',
++    'ASFLAGS',
++    'CMSRCS',
++    'CMMSRCS',
++    'CPP_UNIT_TESTS',
++    'DIRS',
++    'DIST_INSTALL',
++    'EXTRA_DSO_LDOPTS',
++    'EXTRA_JS_MODULES',
++    'EXTRA_PP_COMPONENTS',
++    'EXTRA_PP_JS_MODULES',
++    'FORCE_SHARED_LIB',
++    'FORCE_STATIC_LIB',
++    'FINAL_LIBRARY',
++    'HOST_CFLAGS',
++    'HOST_CSRCS',
++    'HOST_CMMSRCS',
++    'HOST_CXXFLAGS',
++    'HOST_EXTRA_LIBS',
++    'HOST_LIBRARY_NAME',
++    'HOST_PROGRAM',
++    'HOST_SIMPLE_PROGRAMS',
++    'JAR_MANIFEST',
++    'JAVA_JAR_TARGETS',
++    'LIBRARY_NAME',
++    'LIBS',
++    'MAKE_FRAMEWORK',
++    'MODULE',
++    'NO_DIST_INSTALL',
++    'NO_EXPAND_LIBS',
++    'NO_INTERFACES_MANIFEST',
++    'OS_LIBS',
++    'PARALLEL_DIRS',
++    'PREF_JS_EXPORTS',
++    'PROGRAM',
++    'RESOURCE_FILES',
++    'SHARED_LIBRARY_LIBS',
++    'SHARED_LIBRARY_NAME',
++    'SIMPLE_PROGRAMS',
++    'SONAME',
++    'STATIC_LIBRARY_NAME',
++    'TEST_DIRS',
++    'TOOL_DIRS',
+     # XXX config/Makefile.in specifies this in a make invocation
+     # 'USE_EXTENSION_MANIFEST',
+-    b'XPCSHELL_TESTS',
+-    b'XPIDL_MODULE',
++    'XPCSHELL_TESTS',
++    'XPIDL_MODULE',
+ ]
+ 
+ DEPRECATED_VARIABLES = [
+-    b'ALLOW_COMPILER_WARNINGS',
+-    b'EXPORT_LIBRARY',
+-    b'EXTRA_LIBS',
+-    b'FAIL_ON_WARNINGS',
+-    b'HOST_LIBS',
+-    b'LIBXUL_LIBRARY',
+-    b'MOCHITEST_A11Y_FILES',
+-    b'MOCHITEST_BROWSER_FILES',
+-    b'MOCHITEST_BROWSER_FILES_PARTS',
+-    b'MOCHITEST_CHROME_FILES',
+-    b'MOCHITEST_FILES',
+-    b'MOCHITEST_FILES_PARTS',
+-    b'MOCHITEST_METRO_FILES',
+-    b'MOCHITEST_ROBOCOP_FILES',
+-    b'MODULE_OPTIMIZE_FLAGS',
+-    b'MOZ_CHROME_FILE_FORMAT',
+-    b'SHORT_LIBNAME',
+-    b'TESTING_JS_MODULES',
+-    b'TESTING_JS_MODULE_DIR',
++    'ALLOW_COMPILER_WARNINGS',
++    'EXPORT_LIBRARY',
++    'EXTRA_LIBS',
++    'FAIL_ON_WARNINGS',
++    'HOST_LIBS',
++    'LIBXUL_LIBRARY',
++    'MOCHITEST_A11Y_FILES',
++    'MOCHITEST_BROWSER_FILES',
++    'MOCHITEST_BROWSER_FILES_PARTS',
++    'MOCHITEST_CHROME_FILES',
++    'MOCHITEST_FILES',
++    'MOCHITEST_FILES_PARTS',
++    'MOCHITEST_METRO_FILES',
++    'MOCHITEST_ROBOCOP_FILES',
++    'MODULE_OPTIMIZE_FLAGS',
++    'MOZ_CHROME_FILE_FORMAT',
++    'SHORT_LIBNAME',
++    'TESTING_JS_MODULES',
++    'TESTING_JS_MODULE_DIR',
+ ]
+ 
+ MOZBUILD_VARIABLES_MESSAGE = 'It should only be defined in moz.build files.'
+@@ -210,9 +211,8 @@ class BackendMakeFile(object):
+         self.fh.write(buf)
+ 
+     def write_once(self, buf):
+-        if isinstance(buf, unicode):
+-            buf = buf.encode('utf-8')
+-        if b'\n' + buf not in self.fh.getvalue():
++        buf = six.ensure_text(buf)
++        if '\n' + buf not in six.ensure_text(self.fh.getvalue()):
+             self.write(buf)
+ 
+     # For compatibility with makeutil.Makefile
+@@ -753,8 +753,9 @@ class RecursiveMakeBackend(MakeBackend):
+             if main:
+                 rule.add_dependencies('%s/%s' % (d, tier) for d in main)
+ 
+-        all_compile_deps = reduce(lambda x, y: x | y,
+-                                  self._compile_graph.values()) if self._compile_graph else set()
++        all_compile_deps = six.moves.reduce(
++            lambda x, y: x | y,
++            self._compile_graph.values()) if self._compile_graph else set()
+         # Include the following as dependencies of the top recursion target for
+         # compilation:
+         # - nodes that are not dependended upon by anything. Typically, this
+@@ -767,7 +768,7 @@ class RecursiveMakeBackend(MakeBackend):
+         #   as direct dependencies of the top recursion target, to somehow
+         #   prioritize them.
+         #   1. See bug 1262241 comment 5.
+-        compile_roots = [t for t, deps in self._compile_graph.iteritems()
++        compile_roots = [t for t, deps in six.iteritems(self._compile_graph)
+                          if not deps or t not in all_compile_deps]
+ 
+         def add_category_rules(category, roots, graph):
+@@ -810,7 +811,7 @@ class RecursiveMakeBackend(MakeBackend):
+                 self._no_skip['syms'].remove(dirname)
+ 
+         add_category_rules('compile', compile_roots, self._compile_graph)
+-        for category, graph in non_default_graphs.iteritems():
++        for category, graph in six.iteritems(non_default_graphs):
+             add_category_rules(category, non_default_roots[category], graph)
+ 
+         root_mk = Makefile()
+@@ -832,7 +833,7 @@ class RecursiveMakeBackend(MakeBackend):
+         root_mk.add_statement('non_default_tiers := %s' % ' '.join(sorted(
+             non_default_roots.keys())))
+ 
+-        for category, graphs in non_default_graphs.iteritems():
++        for category, graphs in six.iteritems(non_default_graphs):
+             category_dirs = [mozpath.dirname(target)
+                              for target in graphs.keys()]
+             root_mk.add_statement('%s_dirs := %s' % (category,
+@@ -877,14 +878,14 @@ class RecursiveMakeBackend(MakeBackend):
+             rule.add_dependencies(['$(CURDIR)/%: %'])
+ 
+     def _check_blacklisted_variables(self, makefile_in, makefile_content):
+-        if b'EXTERNALLY_MANAGED_MAKE_FILE' in makefile_content:
++        if 'EXTERNALLY_MANAGED_MAKE_FILE' in makefile_content:
+             # Bypass the variable restrictions for externally managed makefiles.
+             return
+ 
+         for l in makefile_content.splitlines():
+             l = l.strip()
+             # Don't check comments
+-            if l.startswith(b'#'):
++            if l.startswith('#'):
+                 continue
+             for x in chain(MOZBUILD_VARIABLES, DEPRECATED_VARIABLES):
+                 if x not in l:
+@@ -941,11 +942,10 @@ class RecursiveMakeBackend(MakeBackend):
+                     # Directories with a Makefile containing a tools target, or
+                     # XPI_PKGNAME or INSTALL_EXTENSION_ID can't be skipped and
+                     # must run during the 'tools' tier.
+-                    for t in (b'XPI_PKGNAME', b'INSTALL_EXTENSION_ID',
+-                              b'tools'):
++                    for t in ('XPI_PKGNAME', 'INSTALL_EXTENSION_ID', 'tools'):
+                         if t not in content:
+                             continue
+-                        if t == b'tools' and not re.search('(?:^|\s)tools.*::', content, re.M):
++                        if t == 'tools' and not re.search('(?:^|\s)tools.*::', content, re.M):
+                             continue
+                         if objdir == self.environment.topobjdir:
+                             continue
+@@ -1620,20 +1620,20 @@ class RecursiveMakeBackend(MakeBackend):
+                 pp.context.update(extra)
+             if not pp.context.get('autoconfmk', ''):
+                 pp.context['autoconfmk'] = 'autoconf.mk'
+-            pp.handleLine(b'# THIS FILE WAS AUTOMATICALLY GENERATED. DO NOT MODIFY BY HAND.\n')
+-            pp.handleLine(b'DEPTH := @DEPTH@\n')
+-            pp.handleLine(b'topobjdir := @topobjdir@\n')
+-            pp.handleLine(b'topsrcdir := @top_srcdir@\n')
+-            pp.handleLine(b'srcdir := @srcdir@\n')
+-            pp.handleLine(b'srcdir_rel := @srcdir_rel@\n')
+-            pp.handleLine(b'relativesrcdir := @relativesrcdir@\n')
+-            pp.handleLine(b'include $(DEPTH)/config/@autoconfmk@\n')
++            pp.handleLine('# THIS FILE WAS AUTOMATICALLY GENERATED. DO NOT MODIFY BY HAND.\n')
++            pp.handleLine('DEPTH := @DEPTH@\n')
++            pp.handleLine('topobjdir := @topobjdir@\n')
++            pp.handleLine('topsrcdir := @top_srcdir@\n')
++            pp.handleLine('srcdir := @srcdir@\n')
++            pp.handleLine('srcdir_rel := @srcdir_rel@\n')
++            pp.handleLine('relativesrcdir := @relativesrcdir@\n')
++            pp.handleLine('include $(DEPTH)/config/@autoconfmk@\n')
+             if not stub:
+                 pp.do_include(obj.input_path)
+             # Empty line to avoid failures when last line in Makefile.in ends
+             # with a backslash.
+-            pp.handleLine(b'\n')
+-            pp.handleLine(b'include $(topsrcdir)/config/recurse.mk\n')
++            pp.handleLine('\n')
++            pp.handleLine('include $(topsrcdir)/config/recurse.mk\n')
+         if not stub:
+             # Adding the Makefile.in here has the desired side-effect
+             # that if the Makefile.in disappears, this will force
+diff --git a/python/mozbuild/mozbuild/backend/test_manifest.py b/python/mozbuild/mozbuild/backend/test_manifest.py
+index 3f340c88c3b7..0e3509e4f333 100644
+--- a/python/mozbuild/mozbuild/backend/test_manifest.py
++++ b/python/mozbuild/mozbuild/backend/test_manifest.py
+@@ -4,8 +4,9 @@
+ 
+ from __future__ import absolute_import, print_function, unicode_literals
+ 
+-import cPickle as pickle
++import six.moves.cPickle as pickle
+ from collections import defaultdict
++import six
+ 
+ import mozpack.path as mozpath
+ 
+@@ -92,7 +93,7 @@ class TestManifestBackend(PartialBackend):
+             self.manifest_defaults[sub_manifest] = defaults
+ 
+     def add_installs(self, obj, topsrcdir):
+-        for src, (dest, _) in obj.installs.iteritems():
++        for src, (dest, _) in six.iteritems(obj.installs):
+             key = src[len(topsrcdir)+1:]
+             self.installs_by_path[key].append((src, dest))
+         for src, pat, dest in obj.pattern_installs:
+diff --git a/python/mozbuild/mozbuild/frontend/emitter.py b/python/mozbuild/mozbuild/frontend/emitter.py
+index 4e69d691d420..1d73d0574a64 100644
+--- a/python/mozbuild/mozbuild/frontend/emitter.py
++++ b/python/mozbuild/mozbuild/frontend/emitter.py
+@@ -446,7 +446,7 @@ class TreeMetadataEmitter(LoggingMixin):
+                         libs[key] = l
+                     if key not in libs:
+                         libs[key] = l
+-            candidates = libs.values()
++            candidates = list(libs.values())
+             if force_static and not candidates:
+                 if dir:
+                     raise SandboxValidationError(
+diff --git a/python/mozbuild/mozbuild/test/backend/test_recursivemake.py b/python/mozbuild/mozbuild/test/backend/test_recursivemake.py
+index 25f399a6e90b..1e95ab5e962d 100644
+--- a/python/mozbuild/mozbuild/test/backend/test_recursivemake.py
++++ b/python/mozbuild/mozbuild/test/backend/test_recursivemake.py
+@@ -4,8 +4,10 @@
+ 
+ from __future__ import absolute_import, print_function, unicode_literals
+ 
+-import cPickle as pickle
++import io
+ import os
++import six.moves.cPickle as pickle
++import six
+ import unittest
+ 
+ from mozpack.manifests import (
+@@ -671,7 +673,7 @@ class TestRecursiveMakeBackend(BackendTester):
+         env = self._consume('test-manifest-shared-support', TestManifestBackend)
+         test_installs_path = mozpath.join(env.topobjdir, 'test-installs.pkl')
+ 
+-        with open(test_installs_path, 'r') as fh:
++        with open(test_installs_path, 'rb') as fh:
+             test_installs = pickle.load(fh)
+ 
+         self.assertEqual(set(test_installs.keys()),
+@@ -954,7 +956,7 @@ class TestRecursiveMakeBackend(BackendTester):
+         expected[mozpath.join(env.topobjdir, 'final-target')] = [
+             'FINAL_TARGET = $(DEPTH)/random-final-target'
+         ]
+-        for key, expected_rules in expected.iteritems():
++        for key, expected_rules in six.iteritems(expected):
+             backend_path = mozpath.join(key, 'backend.mk')
+             lines = [l.strip() for l in open(backend_path, 'rt').readlines()[2:]]
+             found = [str for str in lines if
+@@ -1034,13 +1036,13 @@ class TestRecursiveMakeBackend(BackendTester):
+         env = self._consume('prog-lib-c-only', RecursiveMakeBackend)
+ 
+         # PROGRAM C-onlyness.
+-        with open(os.path.join(env.topobjdir, 'c-program', 'backend.mk'), 'rb') as fh:
++        with open(os.path.join(env.topobjdir, 'c-program', 'backend.mk'), 'r') as fh:
+             lines = fh.readlines()
+             lines = [line.rstrip() for line in lines]
+ 
+             self.assertIn('PROG_IS_C_ONLY_c_test_program := 1', lines)
+ 
+-        with open(os.path.join(env.topobjdir, 'cxx-program', 'backend.mk'), 'rb') as fh:
++        with open(os.path.join(env.topobjdir, 'cxx-program', 'backend.mk'), 'r') as fh:
+             lines = fh.readlines()
+             lines = [line.rstrip() for line in lines]
+ 
+@@ -1050,13 +1052,13 @@ class TestRecursiveMakeBackend(BackendTester):
+                 self.assertNotIn('PROG_IS_C_ONLY_cxx_test_program', line)
+ 
+         # SIMPLE_PROGRAMS C-onlyness.
+-        with open(os.path.join(env.topobjdir, 'c-simple-programs', 'backend.mk'), 'rb') as fh:
++        with open(os.path.join(env.topobjdir, 'c-simple-programs', 'backend.mk'), 'r') as fh:
+             lines = fh.readlines()
+             lines = [line.rstrip() for line in lines]
+ 
+             self.assertIn('PROG_IS_C_ONLY_c_simple_program := 1', lines)
+ 
+-        with open(os.path.join(env.topobjdir, 'cxx-simple-programs', 'backend.mk'), 'rb') as fh:
++        with open(os.path.join(env.topobjdir, 'cxx-simple-programs', 'backend.mk'), 'r') as fh:
+             lines = fh.readlines()
+             lines = [line.rstrip() for line in lines]
+ 
+@@ -1064,13 +1066,13 @@ class TestRecursiveMakeBackend(BackendTester):
+                 self.assertNotIn('PROG_IS_C_ONLY_cxx_simple_program', line)
+ 
+         # Libraries C-onlyness.
+-        with open(os.path.join(env.topobjdir, 'c-library', 'backend.mk'), 'rb') as fh:
++        with open(os.path.join(env.topobjdir, 'c-library', 'backend.mk'), 'r') as fh:
+             lines = fh.readlines()
+             lines = [line.rstrip() for line in lines]
+ 
+             self.assertIn('LIB_IS_C_ONLY := 1', lines)
+ 
+-        with open(os.path.join(env.topobjdir, 'cxx-library', 'backend.mk'), 'rb') as fh:
++        with open(os.path.join(env.topobjdir, 'cxx-library', 'backend.mk'), 'r') as fh:
+             lines = fh.readlines()
+             lines = [line.rstrip() for line in lines]
+ 
+@@ -1104,7 +1106,7 @@ class TestRecursiveMakeBackend(BackendTester):
+         }
+         actual_linkage = {}
+         for name in expected_linkage.keys():
+-            with open(os.path.join(env.topobjdir, name, 'backend.mk'), 'rb') as fh:
++            with open(os.path.join(env.topobjdir, name, 'backend.mk'), 'r') as fh:
+                 actual_linkage[name] = [line.rstrip() for line in fh.readlines()]
+         for name in expected_linkage:
+             for var in expected_linkage[name]:
+@@ -1131,7 +1133,7 @@ class TestRecursiveMakeBackend(BackendTester):
+         }
+         actual_list_files = {}
+         for name in expected_list_files.keys():
+-            with open(os.path.join(env.topobjdir, name), 'rb') as fh:
++            with open(os.path.join(env.topobjdir, name), 'r') as fh:
+                 actual_list_files[name] = [line.rstrip()
+                                            for line in fh.readlines()]
+         for name in expected_list_files:
+@@ -1140,7 +1142,7 @@ class TestRecursiveMakeBackend(BackendTester):
+ 
+         # We don't produce a list file for a shared library composed only of
+         # object files in its directory, but instead list them in a variable.
+-        with open(os.path.join(env.topobjdir, 'prog', 'qux', 'backend.mk'), 'rb') as fh:
++        with open(os.path.join(env.topobjdir, 'prog', 'qux', 'backend.mk'), 'r') as fh:
+             lines = [line.rstrip() for line in fh.readlines()]
+ 
+         self.assertIn('qux.so_OBJS := qux1.o', lines)
+@@ -1148,7 +1150,7 @@ class TestRecursiveMakeBackend(BackendTester):
+     def test_jar_manifests(self):
+         env = self._consume('jar-manifests', RecursiveMakeBackend)
+ 
+-        with open(os.path.join(env.topobjdir, 'backend.mk'), 'rb') as fh:
++        with open(os.path.join(env.topobjdir, 'backend.mk'), 'r') as fh:
+             lines = fh.readlines()
+ 
+         lines = [line.rstrip() for line in lines]
+@@ -1197,7 +1199,7 @@ class TestRecursiveMakeBackend(BackendTester):
+         ]
+         prefix = 'PROGRAM = '
+         for (subdir, expected_program) in expected:
+-            with open(os.path.join(env.topobjdir, subdir, 'backend.mk'), 'rb') as fh:
++            with io.open(os.path.join(env.topobjdir, subdir, 'backend.mk'), 'r') as fh:
+                 lines = fh.readlines()
+                 program = [line.rstrip().split(prefix, 1)[1] for line in lines
+                            if line.startswith(prefix)][0]
+diff --git a/python/mozbuild/mozbuild/test/python.ini b/python/mozbuild/mozbuild/test/python.ini
+index e7572ef15392..b52d2b2f3900 100644
+--- a/python/mozbuild/mozbuild/test/python.ini
++++ b/python/mozbuild/mozbuild/test/python.ini
+@@ -1,6 +1,8 @@
+ [DEFAULT]
+ subsuite = mozbuild
+ 
++[backend/test_fastermake.py]
++[backend/test_recursivemake.py]
+ [configure/test_checks_configure.py]
+ [configure/test_compile_checks.py]
+ [configure/test_configure.py]
+diff --git a/python/mozbuild/mozbuild/test/python2.ini b/python/mozbuild/mozbuild/test/python2.ini
+index c429f29d2f03..1ca14bcc6e5b 100644
+--- a/python/mozbuild/mozbuild/test/python2.ini
++++ b/python/mozbuild/mozbuild/test/python2.ini
+@@ -10,10 +10,8 @@ skip-if = python == 3
+ skip-if = (os == "win")
+ [backend/test_build.py]
+ [backend/test_configenvironment.py]
+-[backend/test_fastermake.py]
+ [backend/test_gn_processor.py]
+ [backend/test_partialconfigenvironment.py]
+-[backend/test_recursivemake.py]
+ [backend/test_test_manifest.py]
+ [backend/test_visualstudio.py]
+ [codecoverage/test_lcov_rewrite.py]
+diff --git a/python/mozbuild/mozbuild/util.py b/python/mozbuild/mozbuild/util.py
+index b952266fb63b..feb0dc0e3608 100644
+--- a/python/mozbuild/mozbuild/util.py
++++ b/python/mozbuild/mozbuild/util.py
+@@ -227,9 +227,7 @@ class FileAvoidWrite(BytesIO):
+         self._binary_mode = 'b' in readmode
+ 
+     def write(self, buf):
+-        if isinstance(buf, six.text_type):
+-            buf = buf.encode('utf-8')
+-        BytesIO.write(self, buf)
++        BytesIO.write(self, six.ensure_binary(buf))
+ 
+     def avoid_writing_to_file(self):
+         self._write_to_file = False

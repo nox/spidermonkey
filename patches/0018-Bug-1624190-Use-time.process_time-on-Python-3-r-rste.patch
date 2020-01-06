@@ -1,0 +1,64 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Anthony Ramine <nox@nox.paris>
+Date: Sun, 22 Mar 2020 14:57:19 +0100
+Subject: [PATCH] Bug 1624190 - Use time.process_time() on Python 3; r?rstewart
+
+time.clock() is deprecated since Python 3.3 and gone in Python 3.8.
+
+Differential Revision: https://phabricator.services.mozilla.com/D67774
+
+diff --git a/python/mozbuild/mozbuild/config_status.py b/python/mozbuild/mozbuild/config_status.py
+index 6da22f009f32..f18eb6670bfc 100644
+--- a/python/mozbuild/mozbuild/config_status.py
++++ b/python/mozbuild/mozbuild/config_status.py
+@@ -21,13 +21,16 @@ from mozbuild.base import MachCommandConditions
+ from mozbuild.frontend.emitter import TreeMetadataEmitter
+ from mozbuild.frontend.reader import BuildReader
+ from mozbuild.mozinfo import write_mozinfo
+-from mozbuild.util import FileAvoidWrite
+ from itertools import chain
+ 
+ from mozbuild.backend import (
+     backends,
+     get_backend_class,
+ )
++from mozbuild.util import (
++    FileAvoidWrite,
++    process_time,
++)
+ 
+ 
+ log_manager = LoggingManager()
+@@ -117,7 +120,7 @@ def config_status(topobjdir='.', topsrcdir='.', defines=None,
+     with FileAvoidWrite(os.path.join(topobjdir, 'mozinfo.json')) as f:
+         write_mozinfo(f, env, os.environ)
+ 
+-    cpu_start = time.clock()
++    cpu_start = process_time()
+     time_start = time.time()
+ 
+     # Make appropriate backend instances, defaulting to RecursiveMakeBackend,
+@@ -153,7 +156,7 @@ def config_status(topobjdir='.', topsrcdir='.', defines=None,
+             summary = obj.gyp_summary()
+             print(summary, file=sys.stderr)
+ 
+-    cpu_time = time.clock() - cpu_start
++    cpu_time = process_time() - cpu_start
+     wall_time = time.time() - time_start
+     efficiency = cpu_time / wall_time if wall_time else 100
+     untracked = wall_time - execution_time
+diff --git a/python/mozbuild/mozbuild/util.py b/python/mozbuild/mozbuild/util.py
+index 8cba69d03f49..5389e1e44835 100644
+--- a/python/mozbuild/mozbuild/util.py
++++ b/python/mozbuild/mozbuild/util.py
+@@ -1489,3 +1489,10 @@ def ensure_subprocess_env(env, encoding='utf-8'):
+     """
+     ensure = ensure_bytes if sys.version_info[0] < 3 else ensure_unicode
+     return {ensure(k, encoding): ensure(v, encoding) for k, v in six.iteritems(env)}
++
++
++def process_time():
++    if six.PY2:
++        return time.clock()
++    else:
++        return time.process_time()

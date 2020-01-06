@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Anthony Ramine <nox@nox.paris>
+Date: Sun, 22 Mar 2020 14:55:34 +0100
+Subject: [PATCH] Bug 1624190 - Try importing from collections.abc first;
+ r?rstewart
+
+Differential Revision: https://phabricator.services.mozilla.com/D67773
+
+diff --git a/configure.py b/configure.py
+index 1e5802e5bd4f..a310a35a9e0c 100644
+--- a/configure.py
++++ b/configure.py
+@@ -11,7 +11,12 @@ import logging
+ import os
+ import sys
+ import textwrap
+-from collections import Iterable
++
++
++try:
++    from collections.abc import Iterable
++except ImportError:
++    from collections import Iterable
+ 
+ 
+ base_dir = os.path.abspath(os.path.dirname(__file__))

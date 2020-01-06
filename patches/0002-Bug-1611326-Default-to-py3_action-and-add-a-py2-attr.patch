@@ -1,0 +1,1273 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mike Shal <mshal@mozilla.com>
+Date: Fri, 14 Feb 2020 13:22:46 +0000
+Subject: [PATCH] Bug 1611326 - Default to py3_action, and add a py2 attribute
+ to GENERATED_FILES; r=firefox-build-system-reviewers,rstewart
+
+GENERATED_FILES now defaults to python3 unless py2=True is specified as
+an argument. All existing GENERATED_FILES scripts and GeneratedFile
+templates have the py2=True attribute added, so this patch should
+effectively be a no-op.
+
+Going forward, individual scripts can be converted to python3 and their
+corresponding py2=True attribute can be deleted. In effect, this patch
+will be backed out in pieces until all scripts run in python3, at which
+point the py2 attribute itself can be removed.
+
+Differential Revision: https://phabricator.services.mozilla.com/D60919
+
+--HG--
+extra : moz-landing-system : lando
+
+diff --git a/accessible/xpcom/moz.build b/accessible/xpcom/moz.build
+index ac9043419ad6..90e087580b38 100644
+--- a/accessible/xpcom/moz.build
++++ b/accessible/xpcom/moz.build
+@@ -60,6 +60,7 @@ else:
+ GeneratedFile(
+     'xpcAccEvents.h', 'xpcAccEvents.cpp',
+     script='AccEventGen.py', entry_point='gen_files',
++    py2=True,
+     inputs=[
+         'AccEvents.conf',
+         '!/xpcom/idl-parser/xpidl/xpidllex.py',
+diff --git a/browser/app/winlauncher/freestanding/moz.build b/browser/app/winlauncher/freestanding/moz.build
+index 0daf54889a01..bf977bf0ff74 100644
+--- a/browser/app/winlauncher/freestanding/moz.build
++++ b/browser/app/winlauncher/freestanding/moz.build
+@@ -46,6 +46,7 @@ if CONFIG['COMPILE_ENVIRONMENT']:
+         '%sntdll_freestanding.%s' % (CONFIG['LIB_PREFIX'],
+                                      CONFIG['LIB_SUFFIX']),
+         script='gen_ntdll_freestanding_lib.py',
++        py2=True,
+         inputs=['ntdll_freestanding.def'],
+         flags=[CONFIG['LLVM_DLLTOOL']] + CONFIG['LLVM_DLLTOOL_FLAGS'])
+ 
+diff --git a/browser/locales/moz.build b/browser/locales/moz.build
+index f70b63aae87e..c99fb4801d42 100644
+--- a/browser/locales/moz.build
++++ b/browser/locales/moz.build
+@@ -20,6 +20,7 @@ if CONFIG['MOZ_UPDATER']:
+         'en-US/updater/updater.ini',
+         '../installer/windows/nsis/updater_append.ini',
+     ]
++    updater.py2 = True
+     # Yes, this is weird, but what can you do? This file doesn't want to be in the DIST_SUBDIR,
+     # but we can't really move it to a different directory until we change how locale repacks
+     # work.
+@@ -34,6 +35,7 @@ bookmarks.inputs = [
+     # The `locales/en-US/` will be rewritten to the locale-specific path.
+     'en-US/profile/bookmarks.inc',
+ ]
++bookmarks.py2 = True
+ 
+ with Files("**"):
+     BUG_COMPONENT = ("Firefox Build System", "General")
+diff --git a/build/clang-plugin/moz.build b/build/clang-plugin/moz.build
+index 79bae354acd2..09565cb726b7 100644
+--- a/build/clang-plugin/moz.build
++++ b/build/clang-plugin/moz.build
+@@ -60,6 +60,7 @@ if CONFIG['ENABLE_MOZSEARCH_PLUGIN']:
+     ]
+ 
+ GeneratedFile('ThirdPartyPaths.cpp', script="ThirdPartyPaths.py",
++              py2=True,
+               entry_point="generate", inputs=[
+                   '/tools/rewriting/ThirdPartyPaths.txt',
+                   '/tools/rewriting/Generated.txt',
+diff --git a/build/moz.build b/build/moz.build
+index 42c1e3afed11..fe8ec385a9c8 100644
+--- a/build/moz.build
++++ b/build/moz.build
+@@ -87,6 +87,7 @@ if CONFIG['MOZ_APP_BASENAME']:
+         script='../python/mozbuild/mozbuild/action/preprocessor.py',
+         entry_point='generate',
+         inputs=['application.ini.in'],
++        py2=True,
+         flags=['-D%s=%s' % (k, '1' if v is True else v)
+                for k, v in appini_defines.iteritems()])
+     
+@@ -95,10 +96,12 @@ if CONFIG['MOZ_APP_BASENAME']:
+         FINAL_TARGET_PP_FILES += ['update-settings.ini']
+ 
+     GeneratedFile('application.ini.h', script='appini_header.py',
++                  py2=True,
+                   inputs=['!application.ini'])
+ 
+ if CONFIG['ENABLE_TESTS']:
+     GeneratedFile('automation.py', script='gen_automation.py',
++                  py2=True,
+                   inputs=['automation.py.in'])
+ 
+     TEST_HARNESS_FILES.reftest += [
+diff --git a/build/templates.mozbuild b/build/templates.mozbuild
+index f6456a7b5df9..d2e3c8029746 100644
+--- a/build/templates.mozbuild
++++ b/build/templates.mozbuild
+@@ -177,6 +177,7 @@ def GeneratedFile(name, *names, **kwargs):
+     inputs = kwargs.get('inputs', [])
+     flags = kwargs.get('flags', [])
+     force = kwargs.get('force', False)
++    py2 = kwargs.get('py2', False)
+     if entry_point and not script:
+        error('entry_point cannot be provided if script is not provided')
+     if script and ':' in script:
+@@ -194,6 +195,7 @@ def GeneratedFile(name, *names, **kwargs):
+     generated_file.inputs = inputs
+     generated_file.flags = flags
+     generated_file.force = force
++    generated_file.py2 = py2
+ 
+ include('gecko_templates.mozbuild')
+ include('test_templates.mozbuild')
+diff --git a/build/test_templates.mozbuild b/build/test_templates.mozbuild
+index 0f2c5d9cfa64..649167a27c50 100644
+--- a/build/test_templates.mozbuild
++++ b/build/test_templates.mozbuild
+@@ -9,6 +9,7 @@ def GeneratedTestCertificate(name):
+     if not CONFIG['COMPILE_ENVIRONMENT']:
+         return
+     GeneratedFile(name, script='/security/manager/ssl/tests/unit/pycert.py',
++                  py2=True,
+                   inputs=['%s.certspec' % name])
+     # Turn RELATIVEDIR into list entry: like
+     # 'security/manager/ssl/tests/unit/bad_certs' ->
+@@ -23,6 +24,7 @@ def GeneratedTestKey(name):
+     if not CONFIG['COMPILE_ENVIRONMENT']:
+         return
+     GeneratedFile(name, script='/security/manager/ssl/tests/unit/pykey.py',
++                  py2=True,
+                   inputs=['%s.keyspec' % name])
+     # Turn RELATIVEDIR into list entry: like
+     # 'security/manager/ssl/tests/unit/bad_certs' ->
+diff --git a/build/unix/elfhack/inject/moz.build b/build/unix/elfhack/inject/moz.build
+index 516104c06aaa..060a773d46bc 100644
+--- a/build/unix/elfhack/inject/moz.build
++++ b/build/unix/elfhack/inject/moz.build
+@@ -14,6 +14,7 @@ cpu = CONFIG['CPU_ARCH']
+ 
+ gen_src = '%s.c' % cpu
+ GeneratedFile(gen_src, script='copy_source.py', entry_point='copy',
++              py2=True,
+               inputs = ['../inject.c'])
+ 
+ SOURCES += [
+diff --git a/config/external/ffi/moz.build b/config/external/ffi/moz.build
+index f9151877072f..4adfae03ba15 100644
+--- a/config/external/ffi/moz.build
++++ b/config/external/ffi/moz.build
+@@ -17,6 +17,7 @@ else:
+     ]
+     GeneratedFile('../../../js/src/ctypes/libffi/include/ffi.h',
+                   script='subst_header.py',
++                  py2=True,
+                   inputs=['../../../js/src/ctypes/libffi/include/ffi.h.in'])
+ 
+     LOCAL_INCLUDES += [
+@@ -85,6 +86,7 @@ else:
+                 '!../../../js/src/ctypes/libffi/include/ffi.h',
+             ],
+             script='preprocess_libffi_asm.py',
++            py2=True,
+             flags=['$(DEFINES)', '$(LOCAL_INCLUDES)'])
+         SOURCES += ['!win64_aarch.asm']
+     elif CONFIG['FFI_TARGET'] == 'X86':
+@@ -104,6 +106,7 @@ else:
+                 '!../../../js/src/ctypes/libffi/fficonfig.h',
+                 '!../../../js/src/ctypes/libffi/include/ffi.h',
+             ], script='preprocess_libffi_asm.py',
++            py2=True,
+             flags=['$(DEFINES)', '$(LOCAL_INCLUDES)'])
+             SOURCES += ['!win32.asm']
+             ASFLAGS += ['-safeseh']
+@@ -120,6 +123,7 @@ else:
+                     '!../../../js/src/ctypes/libffi/fficonfig.h',
+                     '!../../../js/src/ctypes/libffi/include/ffi.h',
+                 ], script='preprocess_libffi_asm.py',
++                py2=True,
+                 flags=['$(DEFINES)', '$(LOCAL_INCLUDES)'])
+             SOURCES += ['!win64.asm']
+     elif CONFIG['FFI_TARGET'] == 'X86_DARWIN':
+diff --git a/config/external/icu/data/moz.build b/config/external/icu/data/moz.build
+index d4741a066850..11d133f58f78 100644
+--- a/config/external/icu/data/moz.build
++++ b/config/external/icu/data/moz.build
+@@ -25,6 +25,7 @@ LOCAL_INCLUDES += ['.']
+ if CONFIG['OS_TARGET'] == 'WINNT' and CONFIG['CPU_ARCH'] == 'aarch64':
+     icudata = 'icudata.asm'
+     GeneratedFile(icudata, script='genicudata.py',
++                  py2=True,
+                   inputs=[CONFIG['ICU_DATA_FILE']], flags=[data_symbol])
+     SOURCES += ['!%s' % icudata]
+ elif CONFIG['HAVE_YASM']:
+diff --git a/config/moz.build b/config/moz.build
+index 70d93a63d90f..97f4a008cd15 100644
+--- a/config/moz.build
++++ b/config/moz.build
+@@ -62,6 +62,7 @@ if CONFIG['WRAP_STL_INCLUDES']:
+         stl.script = 'make-stl-wrappers.py:gen_wrappers'
+         stl.flags = [output_dir, stl_compiler, template_file]
+         stl.flags.extend(stl_headers)
++        stl.py2 = True
+ 
+     # Wrap <windows.h> to make it easier to use correctly
+     # NOTE: If we aren't wrapping STL includes, we're building part of the browser
+@@ -71,6 +72,7 @@ if CONFIG['WRAP_STL_INCLUDES']:
+         GeneratedFile('../dist/stl_wrappers/windows.h',
+                       script='make-windows-h-wrapper.py',
+                       entry_point='generate',
++                      py2=True,
+                       inputs = ['windows-h-constant.decls.h',
+                                 'windows-h-unicode.decls.h',
+                                 'windows-h-wrapper.template.h'],
+@@ -86,3 +88,4 @@ if CONFIG['WRAP_SYSTEM_INCLUDES']:
+     system.flags = [output_dir]
+     system.flags.extend(stl_headers)
+     system.flags.extend(system_headers)
++    system.py2 = True
+diff --git a/devtools/client/shared/build/node-templates.mozbuild b/devtools/client/shared/build/node-templates.mozbuild
+index 7b0a5c9abfc5..72cee87b8b9e 100644
+--- a/devtools/client/shared/build/node-templates.mozbuild
++++ b/devtools/client/shared/build/node-templates.mozbuild
+@@ -29,6 +29,7 @@ def CompiledModules(*modules):
+       "node.stub", *[final + '/' + module for module in modules],
+       script='/python/mozbuild/mozbuild/action/node.py',
+       entry_point='generate',
++      py2=True,
+       inputs=['/devtools/client/shared/build/build.js'] +
+              [module for module in modules],
+       flags=[final])
+diff --git a/devtools/shared/webconsole/moz.build b/devtools/shared/webconsole/moz.build
+index b55f9827399b..61ac43a516c4 100644
+--- a/devtools/shared/webconsole/moz.build
++++ b/devtools/shared/webconsole/moz.build
+@@ -20,6 +20,7 @@ for dir in RELATIVEDIR.split('/'):
+ base += ["!reserved-js-words.js"]
+ 
+ GeneratedFile('reserved-js-words.js', script='GenerateReservedWordsJS.py',
++              py2=True,
+               inputs = ['/js/src/frontend/ReservedWords.h'])
+ 
+ DevToolsModules(
+diff --git a/dom/base/moz.build b/dom/base/moz.build
+index 4b429d1f2006..7856d370388b 100644
+--- a/dom/base/moz.build
++++ b/dom/base/moz.build
+@@ -546,9 +546,11 @@ if CONFIG['MOZ_X11']:
+     CXXFLAGS += CONFIG['TK_CFLAGS']
+ 
+ GeneratedFile('UseCounterList.h', script='gen-usecounters.py',
++              py2=True,
+               entry_point='use_counter_list', inputs=['UseCounters.conf'])
+ 
+ GeneratedFile('UseCounterWorkerList.h', script='gen-usecounters.py',
++              py2=True,
+               entry_point='use_counter_list', inputs=['UseCountersWorker.conf'])
+ 
+ if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
+diff --git a/dom/bindings/moz.build b/dom/bindings/moz.build
+index f80621c37fc7..be0394010f63 100644
+--- a/dom/bindings/moz.build
++++ b/dom/bindings/moz.build
+@@ -176,6 +176,7 @@ if CONFIG['CC_TYPE'] in ('clang', 'gcc'):
+ if CONFIG['COMPILE_ENVIRONMENT']:
+     GeneratedFile('CSS2Properties.webidl',
+                   script='GenerateCSS2PropertiesWebIDL.py',
++                  py2=True,
+                   entry_point='generate',
+                   inputs=[
+                       '/dom/webidl/CSS2Properties.webidl.in',
+diff --git a/dom/encoding/moz.build b/dom/encoding/moz.build
+index 40779816b562..45666744404c 100644
+--- a/dom/encoding/moz.build
++++ b/dom/encoding/moz.build
+@@ -34,11 +34,12 @@ prefixes = (
+ for prefix in prefixes:
+     input_file = prefix + '.properties'
+     header = prefix + '.properties.h'
+-    GeneratedFile(header, script=props2arrays, inputs=[input_file])
++    GeneratedFile(header, script=props2arrays, inputs=[input_file], py2=True)
+ 
+ input_file = 'nonparticipatingdomains.properties'
+ header = input_file + '.h'
+ GeneratedFile(header, script='../../intl/locale/props2arrays.py',
++              py2=True,
+               inputs=[input_file])
+ 
+ MOCHITEST_MANIFESTS += [
+diff --git a/dom/webgpu/ffi/moz.build b/dom/webgpu/ffi/moz.build
+index b290474e4565..04a44fecd149 100644
+--- a/dom/webgpu/ffi/moz.build
++++ b/dom/webgpu/ffi/moz.build
+@@ -15,6 +15,7 @@ if CONFIG['COMPILE_ENVIRONMENT']:
+     GeneratedFile('wgpu_ffi_generated.h',
+                   script='/layout/style/RunCbindgen.py',
+                   entry_point='generate',
++                  py2=True,
+                   inputs=[
+                     '/gfx/wgpu/wgpu-remote',
+                   ])
+diff --git a/gfx/layers/moz.build b/gfx/layers/moz.build
+index 6d3670ab7558..6a7d930c55b0 100755
+--- a/gfx/layers/moz.build
++++ b/gfx/layers/moz.build
+@@ -589,8 +589,10 @@ include('/ipc/chromium/chromium-config.mozbuild')
+ 
+ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'windows':
+   GeneratedFile('CompositorD3D11Shaders.h', script='d3d11/genshaders.py',
++                py2=True,
+                 inputs=['d3d11/shaders.manifest'])
+   GeneratedFile('MLGShaders.h', script='d3d11/genshaders.py',
++                py2=True,
+                 inputs=['d3d11/mlgshaders/shaders.manifest'])
+ 
+ LOCAL_INCLUDES += [
+diff --git a/gfx/webrender_bindings/moz.build b/gfx/webrender_bindings/moz.build
+index ab505f629712..d9a4533b3fcb 100644
+--- a/gfx/webrender_bindings/moz.build
++++ b/gfx/webrender_bindings/moz.build
+@@ -93,6 +93,7 @@ if CONFIG['COMPILE_ENVIRONMENT']:
+ 
+     GeneratedFile('webrender_ffi_generated.h',
+                   script='/layout/style/RunCbindgen.py', entry_point='generate',
++                  py2=True,
+                   inputs=[
+                       '/gfx/webrender_bindings',
+                       '/gfx/wr/webrender',
+diff --git a/intl/hyphenation/glue/moz.build b/intl/hyphenation/glue/moz.build
+index 065c74fcee56..5aedd3e49f5d 100644
+--- a/intl/hyphenation/glue/moz.build
++++ b/intl/hyphenation/glue/moz.build
+@@ -31,3 +31,4 @@ if CONFIG['COMPILE_ENVIRONMENT']:
+     generated.inputs = [
+         '/third_party/rust/mapped_hyph'
+     ]
++    generated.py2 = True
+diff --git a/intl/locale/moz.build b/intl/locale/moz.build
+index 53cffe34cf61..37833e6e9a77 100644
+--- a/intl/locale/moz.build
++++ b/intl/locale/moz.build
+@@ -77,7 +77,7 @@ prefixes = (
+ for prefix in prefixes:
+     input_file = prefix + '.properties'
+     header = prefix + '.properties.h'
+-    GeneratedFile(header, script='props2arrays.py', inputs=[input_file])
++    GeneratedFile(header, script='props2arrays.py', inputs=[input_file], py2=True)
+ 
+ if CONFIG['ENABLE_TESTS']:
+     DIRS += ['tests/gtest']
+@@ -98,9 +98,11 @@ if CONFIG['COMPILE_ENVIRONMENT']:
+     ffi_generated.inputs = [
+         '/intl/locale/rust/unic-langid-ffi',
+     ]
++    ffi_generated.py2 = True
+ 
+     ffi_generated = GENERATED_FILES['fluent_langneg_ffi_generated.h']
+     ffi_generated.script = '/layout/style/RunCbindgen.py:generate'
+     ffi_generated.inputs = [
+         '/intl/locale/rust/fluent-langneg-ffi',
+     ]
++    ffi_generated.py2 = True
+diff --git a/js/src/build/moz.build b/js/src/build/moz.build
+index b311e9549fed..61bf1b022eeb 100644
+--- a/js/src/build/moz.build
++++ b/js/src/build/moz.build
+@@ -30,6 +30,7 @@ if CONFIG['JS_SHARED_LIBRARY']:
+     # with those in libxul.
+     if CONFIG['OS_TARGET'] == 'Linux':
+         GeneratedFile('symverscript', script='/build/gen_symverscript.py', 
++                      py2=True,
+                       inputs=['symverscript.in'], 
+                       flags=[CONFIG['JS_LIBRARY_NAME'].replace('-', '_')])
+         SYMBOLS_FILE = '!symverscript'
+@@ -85,6 +86,7 @@ DIST_INSTALL = True
+ # running the script for no-op builds.
+ GeneratedFile(
+     'spidermonkey_checks', script='/config/run_spidermonkey_checks.py',
++    py2=True,
+     inputs=[
+         '!%sjs_static.%s' % (CONFIG['LIB_PREFIX'], CONFIG['LIB_SUFFIX']),
+         '/config/check_spidermonkey_style.py',
+diff --git a/js/src/frontend/moz.build b/js/src/frontend/moz.build
+index 00e8f2ba2475..d3d5a1791ea6 100644
+--- a/js/src/frontend/moz.build
++++ b/js/src/frontend/moz.build
+@@ -18,6 +18,7 @@ include('../js-cxxflags.mozbuild')
+ 
+ # Generate frontend/ReservedWordsGenerated.h from frontend/ReservedWords.h
+ GeneratedFile('ReservedWordsGenerated.h', script='GenerateReservedWords.py',
++              py2=True,
+               inputs=['ReservedWords.h'])
+ 
+ 
+diff --git a/js/src/gc/moz.build b/js/src/gc/moz.build
+index 3c900defdc3e..fee63f374a15 100644
+--- a/js/src/gc/moz.build
++++ b/js/src/gc/moz.build
+@@ -18,8 +18,10 @@ include('../js-cxxflags.mozbuild')
+ 
+ # Generate GC statistics phase data.
+ GeneratedFile('StatsPhasesGenerated.h',
++              py2=True,
+               script='GenerateStatsPhases.py', entry_point='generateHeader')
+ GeneratedFile('StatsPhasesGenerated.inc',
++              py2=True,
+               script='GenerateStatsPhases.py', entry_point='generateCpp')
+ 
+ UNIFIED_SOURCES += [
+diff --git a/js/src/jit/moz.build b/js/src/jit/moz.build
+index 8bdd9cfda546..5065dafd70ea 100644
+--- a/js/src/jit/moz.build
++++ b/js/src/jit/moz.build
+@@ -240,6 +240,7 @@ elif CONFIG['JS_CODEGEN_MIPS32'] or CONFIG['JS_CODEGEN_MIPS64']:
+ # Generate jit/MOpcodes.h from jit/MIR.h
+ GeneratedFile('MOpcodes.h',
+               script='GenerateOpcodeFiles.py',
++              py2=True,
+               entry_point='generate_mir_header',
+               inputs=['MIR.h'])
+ 
+@@ -247,5 +248,6 @@ GeneratedFile('MOpcodes.h',
+ # platform-specific LIR files.
+ GeneratedFile('LOpcodes.h',
+               script='GenerateOpcodeFiles.py',
++              py2=True,
+               entry_point='generate_lir_header',
+               inputs=lir_inputs)
+diff --git a/js/src/moz.build b/js/src/moz.build
+index ba505edb36db..69a35ee3b23c 100755
+--- a/js/src/moz.build
++++ b/js/src/moz.build
+@@ -515,6 +515,7 @@ selfhosted_inputs = [
+ # Prepare self-hosted JS code for embedding
+ GeneratedFile('selfhosted.out.h', 'selfhosted.js',
+               script='builtin/embedjs.py',
++              py2=True,
+               entry_point='generate_selfhosted',
+               inputs=selfhosted_inputs)
+ 
+diff --git a/js/src/shell/moz.build b/js/src/shell/moz.build
+index be6cea093c8b..92823d1d8e36 100644
+--- a/js/src/shell/moz.build
++++ b/js/src/shell/moz.build
+@@ -40,6 +40,7 @@ OS_LIBS += CONFIG['EDITLINE_LIBS']
+ # Prepare module loader JS code for embedding
+ GeneratedFile('shellmoduleloader.out.h', 'shellmoduleloader.js', 
+               script='../builtin/embedjs.py',
++              py2=True,
+               entry_point='generate_shellmoduleloader',
+               inputs=[
+                   '../js.msg',
+diff --git a/layout/generic/moz.build b/layout/generic/moz.build
+index 5cff11691987..d1827f1b64e1 100644
+--- a/layout/generic/moz.build
++++ b/layout/generic/moz.build
+@@ -232,9 +232,11 @@ SOURCES += [
+ 
+ GeneratedFile('FrameIdList.h',
+               script='GenerateFrameLists.py',
++              py2=True,
+               entry_point='generate_frame_id_list_h')
+ GeneratedFile('FrameTypeList.h',
+               script='GenerateFrameLists.py',
++              py2=True,
+               entry_point='generate_frame_type_list_h')
+ 
+ include('/ipc/chromium/chromium-config.mozbuild')
+diff --git a/layout/style/moz.build b/layout/style/moz.build
+index f53ff9af5659..27f0033ae585 100644
+--- a/layout/style/moz.build
++++ b/layout/style/moz.build
+@@ -262,14 +262,17 @@ CONTENT_ACCESSIBLE_FILES += [
+ 
+ 
+ GeneratedFile('nsCSSPropertyID.h', script='GenerateCSSPropertyID.py',
++              py2=True,
+               entry_point='generate',
+               inputs=['nsCSSPropertyID.h.in', '!ServoCSSPropList.py'])
+ GeneratedFile('ServoCSSPropList.h',
+               script='GenerateServoCSSPropList.py',
++              py2=True,
+               entry_point='generate_header',
+               inputs=['!ServoCSSPropList.py'])
+ GeneratedFile('ServoCSSPropList.py',
+               script='GenerateServoCSSPropList.py', entry_point='generate_data',
++              py2=True,
+               inputs=['ServoCSSPropList.mako.py'])
+ 
+ if CONFIG['COMPILE_ENVIRONMENT']:
+@@ -281,24 +284,29 @@ if CONFIG['COMPILE_ENVIRONMENT']:
+ 
+     GeneratedFile('CompositorAnimatableProperties.h',
+                   script='GenerateCompositorAnimatableProperties.py',
++                  py2=True,
+                   entry_point='generate',
+                   inputs=['!ServoCSSPropList.py'])
+     GeneratedFile(
+         'CountedUnknownProperties.h',
+         script='GenerateCountedUnknownProperties.py',
++        py2=True,
+         entry_point='generate',
+         inputs=[
+             '/servo/components/style/properties/counted_unknown_properties.py',
+         ])
+     GeneratedFile('nsComputedDOMStyleGenerated.inc',
+                   script='GenerateComputedDOMStyleGenerated.py',
++                  py2=True,
+                   entry_point='generate',
+                   inputs=['!ServoCSSPropList.py'])
+     GeneratedFile('nsCSSPropsGenerated.inc',
+                   script='GenerateCSSPropsGenerated.py',
++                  py2=True,
+                   entry_point='generate',
+                   inputs=['!ServoCSSPropList.py'])
+     GeneratedFile('ServoStyleConsts.h', script='RunCbindgen.py',
++                  py2=True,
+                   entry_point='generate',
+                   inputs = ['/servo/ports/geckolib', '/servo/components/style'])
+ 
+diff --git a/layout/style/test/gtest/moz.build b/layout/style/test/gtest/moz.build
+index 425f8c7055f0..3f8afa7e006a 100644
+--- a/layout/style/test/gtest/moz.build
++++ b/layout/style/test/gtest/moz.build
+@@ -17,6 +17,7 @@ LOCAL_INCLUDES += [
+ 
+ GeneratedFile('ExampleStylesheet.h',
+               script='generate_example_stylesheet.py',
++              py2=True,
+               inputs=['example.css'])
+ 
+ FINAL_LIBRARY = 'xul-gtest'
+diff --git a/layout/style/test/moz.build b/layout/style/test/moz.build
+index 5b40a4dd2726..8e9915613ea9 100644
+--- a/layout/style/test/moz.build
++++ b/layout/style/test/moz.build
+@@ -149,4 +149,5 @@ if CONFIG['COMPILE_ENVIRONMENT']:
+         'css_properties_like_longhand.js',
+         '!host_ListCSSProperties%s' % CONFIG['HOST_BIN_SUFFIX'],
+     ]
++    GENERATED_FILES['css_properties.js'].py2 = True
+     TEST_HARNESS_FILES.testing.mochitest.tests.layout.style.test += ['!css_properties.js']
+diff --git a/media/libdav1d/asm/moz.build b/media/libdav1d/asm/moz.build
+index d26b45d8a5f9..ee87621db6f6 100644
+--- a/media/libdav1d/asm/moz.build
++++ b/media/libdav1d/asm/moz.build
+@@ -126,6 +126,7 @@ if CONFIG['CPU_ARCH'] in ('x86', 'x86_64'):
+         a.script = '../generate_source.py:add_define'
+         a.inputs = [relative_path + f]
+         a.flags = ['BITDEPTH', '16']
++        a.py2 = True
+ 
+     GENERATED_FILES += [
+         '8bd_%s' % p for p in bitdepth_basenames
+@@ -140,6 +141,7 @@ if CONFIG['CPU_ARCH'] in ('x86', 'x86_64'):
+         a.script = '../generate_source.py:add_define'
+         a.inputs = [relative_path + f]
+         a.flags = ['BITDEPTH', '8']
++        a.py2 = True
+ elif CONFIG['CPU_ARCH'] == 'arm' or CONFIG['CPU_ARCH'] == 'aarch64':
+     SOURCES += [
+         '../../../third_party/dav1d/src/arm/cpu.c',
+@@ -173,6 +175,7 @@ elif CONFIG['CPU_ARCH'] == 'arm' or CONFIG['CPU_ARCH'] == 'aarch64':
+         a.script = '../generate_source.py:add_define'
+         a.inputs = [relative_path + f]
+         a.flags = ['BITDEPTH', '16']
++        a.py2 = True
+ 
+     GENERATED_FILES += [
+         '8bd_%s' % p for p in bitdepth_basenames
+@@ -187,6 +190,7 @@ elif CONFIG['CPU_ARCH'] == 'arm' or CONFIG['CPU_ARCH'] == 'aarch64':
+         a.script = '../generate_source.py:add_define'
+         a.inputs = [relative_path + f]
+         a.flags = ['BITDEPTH', '8']
++        a.py2 = True
+ 
+     # BITDEPTH .S files
+     if CONFIG['CPU_ARCH'] == 'aarch64':
+diff --git a/media/libdav1d/moz.build b/media/libdav1d/moz.build
+index e49e4f910caf..3cceaa25e0e5 100644
+--- a/media/libdav1d/moz.build
++++ b/media/libdav1d/moz.build
+@@ -145,11 +145,13 @@ for f in bitdepth_basenames:
+ 
+     GeneratedFile(file_bd16,
+                   script='generate_source.py',
++                  py2=True,
+                   entry_point='add_define',
+                   inputs=[relative_path + f],
+                   flags=['BITDEPTH', '16'])
+     GeneratedFile(file_bd8,
+                   script='generate_source.py',
++                  py2=True,
+                   entry_point='add_define',
+                   inputs=[relative_path + f],
+                   flags=['BITDEPTH', '8'])
+diff --git a/mobile/android/base/moz.build b/mobile/android/base/moz.build
+index 27e71633831a..11665521aa5e 100644
+--- a/mobile/android/base/moz.build
++++ b/mobile/android/base/moz.build
+@@ -20,3 +20,4 @@ t = ('android_apks',)
+ GENERATED_FILES += [t]
+ GENERATED_FILES[t].force = True
+ GENERATED_FILES[t].script = '/mobile/android/gradle.py:assemble_app'
++GENERATED_FILES[t].py2 = True
+diff --git a/mobile/android/geckoview/src/androidTest/assets/moz.build b/mobile/android/geckoview/src/androidTest/assets/moz.build
+index 0d6ef7aa3dc9..4e818a30e76e 100644
+--- a/mobile/android/geckoview/src/androidTest/assets/moz.build
++++ b/mobile/android/geckoview/src/androidTest/assets/moz.build
+@@ -17,6 +17,7 @@ for addon in addons:
+ 
+     GENERATED_FILES += [xpi]
+     GENERATED_FILES[xpi].script = '../../../../../../toolkit/mozapps/extensions/test/create_xpi.py'
++    GENERATED_FILES[xpi].py2 = True
+     GENERATED_FILES[xpi].inputs = [indir]
+ 
+     TEST_HARNESS_FILES.testing.mochitest.tests.junit += ['!%s' % xpi]
+diff --git a/modules/libpref/moz.build b/modules/libpref/moz.build
+index 330b64a5b121..de11f3c89147 100644
+--- a/modules/libpref/moz.build
++++ b/modules/libpref/moz.build
+@@ -126,6 +126,7 @@ GENERATED_FILES += [gen_all_tuple]
+ static_pref_list = GENERATED_FILES[gen_all_tuple]
+ static_pref_list.script = 'init/generate_static_pref_list.py:emit_code'
+ static_pref_list.inputs = ['init/StaticPrefList.yaml']
++static_pref_list.py2 = True
+ 
+ PYTHON_UNITTEST_MANIFESTS += [
+     'test/python.ini',
+diff --git a/moz.build b/moz.build
+index 015a6ca43651..528c844b9a1d 100644
+--- a/moz.build
++++ b/moz.build
+@@ -164,6 +164,8 @@ if not CONFIG['JS_STANDALONE'] or not CONFIG['MOZ_BUILD_APP']:
+ 
+     GENERATED_FILES['buildid.h'].script = 'build/variables.py:buildid_header'
+     GENERATED_FILES['source-repo.h'].script = 'build/variables.py:source_repo_header'
++    GENERATED_FILES['buildid.h'].py2 = True
++    GENERATED_FILES['source-repo.h'].py2 = True
+ 
+     DIRS += [
+         'build',
+diff --git a/mozglue/dllservices/moz.build b/mozglue/dllservices/moz.build
+index ba73d8c7ef1c..3cafc915e361 100644
+--- a/mozglue/dllservices/moz.build
++++ b/mozglue/dllservices/moz.build
+@@ -53,6 +53,7 @@ GENERATED_FILES += [
+ blocklist_defs = GENERATED_FILES[blocklist_files]
+ blocklist_defs.script = 'gen_dll_blocklist_defs.py:gen_blocklists'
+ blocklist_defs.inputs = ['WindowsDllBlocklistDefs.in']
++blocklist_defs.py2 = True
+ EXPORTS.mozilla += ['!' + hdr for hdr in blocklist_files]
+ 
+ FINAL_LIBRARY = 'mozglue'
+diff --git a/netwerk/dns/moz.build b/netwerk/dns/moz.build
+index d11d9214bcd1..bd6414ab1784 100644
+--- a/netwerk/dns/moz.build
++++ b/netwerk/dns/moz.build
+@@ -75,6 +75,7 @@ include('/ipc/chromium/chromium-config.mozbuild')
+ FINAL_LIBRARY = 'xul'
+ 
+ GeneratedFile('etld_data.inc', script='prepare_tlds.py',
++              py2=True,
+               inputs=['effective_tld_names.dat'])
+ 
+ # need to include etld_data.inc
+diff --git a/netwerk/dns/tests/unit/data/moz.build b/netwerk/dns/tests/unit/data/moz.build
+index 461d3ab06e14..e0d6e0696d1e 100644
+--- a/netwerk/dns/tests/unit/data/moz.build
++++ b/netwerk/dns/tests/unit/data/moz.build
+@@ -10,5 +10,6 @@ fake_remote_dafsa = GENERATED_FILES['fake_remote_dafsa.bin']
+ fake_remote_dafsa.script = '../../../prepare_tlds.py'
+ fake_remote_dafsa.inputs = ['fake_public_suffix_list.dat']
+ fake_remote_dafsa.flags = ['bin']
++fake_remote_dafsa.py2 = True
+ 
+ TEST_HARNESS_FILES.xpcshell.netwerk.dns.tests.unit.data += ['!fake_remote_dafsa.bin']
+diff --git a/netwerk/socket/neqo_glue/moz.build b/netwerk/socket/neqo_glue/moz.build
+index a79699910274..83ba7238fb87 100644
+--- a/netwerk/socket/neqo_glue/moz.build
++++ b/netwerk/socket/neqo_glue/moz.build
+@@ -17,6 +17,7 @@ if CONFIG['COMPILE_ENVIRONMENT']:
+     GeneratedFile('neqo_glue_ffi_generated.h',
+                   script='/layout/style/RunCbindgen.py',
+                   entry_point='generate',
++                  py2=True,
+                   inputs=['/netwerk/socket/neqo_glue'])
+ 
+     EXPORTS.mozilla.net += [
+diff --git a/python/mozbuild/mozbuild/backend/make.py b/python/mozbuild/mozbuild/backend/make.py
+index 9cbe933c1c03..6c4d3755427a 100644
+--- a/python/mozbuild/mozbuild/backend/make.py
++++ b/python/mozbuild/mozbuild/backend/make.py
+@@ -88,10 +88,14 @@ class MakeBackend(CommonBackend):
+             ret.append('GARBAGE += %s' % stub_file)
+             ret.append('EXTRA_MDDEPEND_FILES += %s' % dep_file)
+ 
++            if obj.py2:
++                action = 'py_action'
++            else:
++                action = 'py3_action'
+             ret.append((
+                     """{stub}: {script}{inputs}{backend}{force}
+ \t$(REPORT_BUILD)
+-\t$(call py_action,file_generate,{locale}{script} """  # wrap for E501
++\t$(call {action},file_generate,{locale}{script} """  # wrap for E501
+                     """{method} {output} {dep_file} {stub}{inputs}{flags})
+ \t@$(TOUCH) $@
+ """).format(
+@@ -106,6 +110,7 @@ class MakeBackend(CommonBackend):
+                 # with a different locale as input. IS_LANGUAGE_REPACK will reliably be set
+                 # in this situation, so simply force the generation to run in that case.
+                 force=force,
++                action=action,
+                 locale='--locale=$(AB_CD) ' if obj.localized else '',
+                 script=obj.script,
+                 method=obj.method
+diff --git a/python/mozbuild/mozbuild/frontend/context.py b/python/mozbuild/mozbuild/frontend/context.py
+index 3394115eee53..17fb321e8a30 100644
+--- a/python/mozbuild/mozbuild/frontend/context.py
++++ b/python/mozbuild/mozbuild/frontend/context.py
+@@ -1027,6 +1027,7 @@ GeneratedFilesList = StrictOrderingOnAppendListWithFlagsFactory({
+     'script': six.text_type,
+     'inputs': list,
+     'force': bool,
++    'py2': bool,
+     'flags': list, })
+ 
+ 
+diff --git a/python/mozbuild/mozbuild/frontend/data.py b/python/mozbuild/mozbuild/frontend/data.py
+index d4442b34d988..35855240aea4 100644
+--- a/python/mozbuild/mozbuild/frontend/data.py
++++ b/python/mozbuild/mozbuild/frontend/data.py
+@@ -1233,10 +1233,12 @@ class GeneratedFile(ContextDerived):
+         'required_during_compile',
+         'localized',
+         'force',
++        'py2',
+     )
+ 
+     def __init__(self, context, script, method, outputs, inputs,
+-                 flags=(), localized=False, force=False):
++                 flags=(), localized=False, force=False,
++                 py2=False):
+         ContextDerived.__init__(self, context)
+         self.script = script
+         self.method = method
+@@ -1245,6 +1247,7 @@ class GeneratedFile(ContextDerived):
+         self.flags = flags
+         self.localized = localized
+         self.force = force
++        self.py2 = py2
+ 
+         suffixes = [
+             '.h',
+diff --git a/python/mozbuild/mozbuild/frontend/emitter.py b/python/mozbuild/mozbuild/frontend/emitter.py
+index c0298613e8be..80fc4dca75ca 100644
+--- a/python/mozbuild/mozbuild/frontend/emitter.py
++++ b/python/mozbuild/mozbuild/frontend/emitter.py
+@@ -844,7 +844,7 @@ class TreeMetadataEmitter(LoggingMixin):
+                         defines = lib.defines.get_defines()
+                     yield GeneratedFile(context, script,
+                                         'generate_symbols_file', lib.symbols_file,
+-                                        [symbols_file], defines)
++                                        [symbols_file], defines, py2=True)
+             if static_lib:
+                 is_rust_library = context.get('IS_RUST_LIBRARY')
+                 if is_rust_library:
+@@ -1481,7 +1481,7 @@ class TreeMetadataEmitter(LoggingMixin):
+                                   'action', 'process_define_files.py')
+             yield GeneratedFile(context, script, 'process_define_file',
+                                 unicode(path),
+-                                [Path(context, path + '.in')])
++                                [Path(context, path + '.in')], py2=True)
+ 
+         generated_files = context.get('GENERATED_FILES') or []
+         localized_generated_files = context.get('LOCALIZED_GENERATED_FILES') or []
+@@ -1524,7 +1524,8 @@ class TreeMetadataEmitter(LoggingMixin):
+                     inputs.append(p)
+ 
+                 yield GeneratedFile(context, script, method, outputs, inputs,
+-                                    flags.flags, localized=localized, force=flags.force)
++                                    flags.flags, localized=localized, force=flags.force,
++                                    py2=flags.py2)
+ 
+     def _process_test_manifests(self, context):
+         for prefix, info in TEST_MANIFESTS.items():
+diff --git a/python/mozbuild/mozbuild/frontend/gyp_reader.py b/python/mozbuild/mozbuild/frontend/gyp_reader.py
+index 6e8d0c6cb6c7..f17ade94ad54 100644
+--- a/python/mozbuild/mozbuild/frontend/gyp_reader.py
++++ b/python/mozbuild/mozbuild/frontend/gyp_reader.py
+@@ -100,6 +100,7 @@ def handle_actions(actions, context, action_overrides):
+         g = context['GENERATED_FILES'][output]
+         g.script = action_overrides[name]
+         g.inputs = action['inputs']
++        g.py2 = True
+ 
+ 
+ def handle_copies(copies, context):
+diff --git a/python/mozbuild/mozbuild/test/backend/test_recursivemake.py b/python/mozbuild/mozbuild/test/backend/test_recursivemake.py
+index 4351c2d371b9..25f399a6e90b 100644
+--- a/python/mozbuild/mozbuild/test/backend/test_recursivemake.py
++++ b/python/mozbuild/mozbuild/test/backend/test_recursivemake.py
+@@ -414,7 +414,7 @@ class TestRecursiveMakeBackend(BackendTester):
+             'EXTRA_MDDEPEND_FILES += $(MDDEPDIR)/bar.c.pp',
+             '$(MDDEPDIR)/bar.c.stub: %s/generate-bar.py' % env.topsrcdir,
+             '$(REPORT_BUILD)',
+-            '$(call py_action,file_generate,%s/generate-bar.py baz bar.c $(MDDEPDIR)/bar.c.pp $(MDDEPDIR)/bar.c.stub)' % env.topsrcdir,  # noqa
++            '$(call py3_action,file_generate,%s/generate-bar.py baz bar.c $(MDDEPDIR)/bar.c.pp $(MDDEPDIR)/bar.c.stub)' % env.topsrcdir,  # noqa
+             '@$(TOUCH) $@',
+             '',
+             'export:: $(MDDEPDIR)/foo.h.stub',
+@@ -424,7 +424,7 @@ class TestRecursiveMakeBackend(BackendTester):
+             'EXTRA_MDDEPEND_FILES += $(MDDEPDIR)/foo.h.pp',
+             '$(MDDEPDIR)/foo.h.stub: %s/generate-foo.py $(srcdir)/foo-data' % (env.topsrcdir),
+             '$(REPORT_BUILD)',
+-            '$(call py_action,file_generate,%s/generate-foo.py main foo.h $(MDDEPDIR)/foo.h.pp $(MDDEPDIR)/foo.h.stub $(srcdir)/foo-data)' % (env.topsrcdir),  # noqa
++            '$(call py3_action,file_generate,%s/generate-foo.py main foo.h $(MDDEPDIR)/foo.h.pp $(MDDEPDIR)/foo.h.stub $(srcdir)/foo-data)' % (env.topsrcdir),  # noqa
+             '@$(TOUCH) $@',
+             '',
+         ]
+@@ -447,7 +447,7 @@ class TestRecursiveMakeBackend(BackendTester):
+             'EXTRA_MDDEPEND_FILES += $(MDDEPDIR)/bar.c.pp',
+             '$(MDDEPDIR)/bar.c.stub: %s/generate-bar.py FORCE' % env.topsrcdir,
+             '$(REPORT_BUILD)',
+-            '$(call py_action,file_generate,%s/generate-bar.py baz bar.c $(MDDEPDIR)/bar.c.pp $(MDDEPDIR)/bar.c.stub)' % env.topsrcdir,  # noqa
++            '$(call py3_action,file_generate,%s/generate-bar.py baz bar.c $(MDDEPDIR)/bar.c.pp $(MDDEPDIR)/bar.c.stub)' % env.topsrcdir,  # noqa
+             '@$(TOUCH) $@',
+             '',
+             'foo.c: $(MDDEPDIR)/foo.c.stub ;',
+@@ -456,7 +456,7 @@ class TestRecursiveMakeBackend(BackendTester):
+             'EXTRA_MDDEPEND_FILES += $(MDDEPDIR)/foo.c.pp',
+             '$(MDDEPDIR)/foo.c.stub: %s/generate-foo.py $(srcdir)/foo-data' % (env.topsrcdir),
+             '$(REPORT_BUILD)',
+-            '$(call py_action,file_generate,%s/generate-foo.py main foo.c $(MDDEPDIR)/foo.c.pp $(MDDEPDIR)/foo.c.stub $(srcdir)/foo-data)' % (env.topsrcdir),  # noqa
++            '$(call py3_action,file_generate,%s/generate-foo.py main foo.c $(MDDEPDIR)/foo.c.pp $(MDDEPDIR)/foo.c.stub $(srcdir)/foo-data)' % (env.topsrcdir),  # noqa
+             '@$(TOUCH) $@',
+             '',
+         ]
+@@ -480,7 +480,7 @@ class TestRecursiveMakeBackend(BackendTester):
+             'EXTRA_MDDEPEND_FILES += $(MDDEPDIR)/foo.xyz.pp',
+             '$(MDDEPDIR)/foo.xyz.stub: %s/generate-foo.py $(call MERGE_FILE,localized-input) $(srcdir)/non-localized-input $(if $(IS_LANGUAGE_REPACK),FORCE)' % env.topsrcdir,  # noqa
+             '$(REPORT_BUILD)',
+-            '$(call py_action,file_generate,--locale=$(AB_CD) %s/generate-foo.py main foo.xyz $(MDDEPDIR)/foo.xyz.pp $(MDDEPDIR)/foo.xyz.stub $(call MERGE_FILE,localized-input) $(srcdir)/non-localized-input)' % env.topsrcdir,  # noqa
++            '$(call py3_action,file_generate,--locale=$(AB_CD) %s/generate-foo.py main foo.xyz $(MDDEPDIR)/foo.xyz.pp $(MDDEPDIR)/foo.xyz.stub $(call MERGE_FILE,localized-input) $(srcdir)/non-localized-input)' % env.topsrcdir,  # noqa
+             '@$(TOUCH) $@',
+             '',
+             'LOCALIZED_FILES_0_FILES += foo.xyz',
+@@ -508,7 +508,7 @@ class TestRecursiveMakeBackend(BackendTester):
+             'EXTRA_MDDEPEND_FILES += $(MDDEPDIR)/foo.xyz.pp',
+             '$(MDDEPDIR)/foo.xyz.stub: %s/generate-foo.py $(call MERGE_FILE,localized-input) $(srcdir)/non-localized-input $(if $(IS_LANGUAGE_REPACK),FORCE)' % env.topsrcdir,  # noqa
+             '$(REPORT_BUILD)',
+-            '$(call py_action,file_generate,--locale=$(AB_CD) %s/generate-foo.py main foo.xyz $(MDDEPDIR)/foo.xyz.pp $(MDDEPDIR)/foo.xyz.stub $(call MERGE_FILE,localized-input) $(srcdir)/non-localized-input)' % env.topsrcdir,  # noqa
++            '$(call py3_action,file_generate,--locale=$(AB_CD) %s/generate-foo.py main foo.xyz $(MDDEPDIR)/foo.xyz.pp $(MDDEPDIR)/foo.xyz.stub $(call MERGE_FILE,localized-input) $(srcdir)/non-localized-input)' % env.topsrcdir,  # noqa
+             '@$(TOUCH) $@',
+             '',
+             'libs:: $(MDDEPDIR)/abc.xyz.stub',
+@@ -518,7 +518,7 @@ class TestRecursiveMakeBackend(BackendTester):
+             'EXTRA_MDDEPEND_FILES += $(MDDEPDIR)/abc.xyz.pp',
+             '$(MDDEPDIR)/abc.xyz.stub: %s/generate-foo.py $(call MERGE_FILE,localized-input) $(srcdir)/non-localized-input FORCE' % env.topsrcdir,  # noqa
+             '$(REPORT_BUILD)',
+-            '$(call py_action,file_generate,--locale=$(AB_CD) %s/generate-foo.py main abc.xyz $(MDDEPDIR)/abc.xyz.pp $(MDDEPDIR)/abc.xyz.stub $(call MERGE_FILE,localized-input) $(srcdir)/non-localized-input)' % env.topsrcdir,  # noqa
++            '$(call py3_action,file_generate,--locale=$(AB_CD) %s/generate-foo.py main abc.xyz $(MDDEPDIR)/abc.xyz.pp $(MDDEPDIR)/abc.xyz.stub $(call MERGE_FILE,localized-input) $(srcdir)/non-localized-input)' % env.topsrcdir,  # noqa
+             '@$(TOUCH) $@',
+             '',
+         ]
+@@ -543,7 +543,7 @@ class TestRecursiveMakeBackend(BackendTester):
+             'EXTRA_MDDEPEND_FILES += $(MDDEPDIR)/foo$(AB_CD).xyz.pp',
+             '$(MDDEPDIR)/foo$(AB_CD).xyz.stub: %s/generate-foo.py $(call MERGE_FILE,localized-input) $(srcdir)/non-localized-input $(if $(IS_LANGUAGE_REPACK),FORCE)' % env.topsrcdir,  # noqa
+             '$(REPORT_BUILD)',
+-            '$(call py_action,file_generate,--locale=$(AB_CD) %s/generate-foo.py main foo$(AB_CD).xyz $(MDDEPDIR)/foo$(AB_CD).xyz.pp $(MDDEPDIR)/foo$(AB_CD).xyz.stub $(call MERGE_FILE,localized-input) $(srcdir)/non-localized-input)' % env.topsrcdir,  # noqa
++            '$(call py3_action,file_generate,--locale=$(AB_CD) %s/generate-foo.py main foo$(AB_CD).xyz $(MDDEPDIR)/foo$(AB_CD).xyz.pp $(MDDEPDIR)/foo$(AB_CD).xyz.stub $(call MERGE_FILE,localized-input) $(srcdir)/non-localized-input)' % env.topsrcdir,  # noqa
+             '@$(TOUCH) $@',
+             '',
+             'bar$(AB_rCD).xyz: $(MDDEPDIR)/bar$(AB_rCD).xyz.stub ;',
+@@ -552,7 +552,7 @@ class TestRecursiveMakeBackend(BackendTester):
+             'EXTRA_MDDEPEND_FILES += $(MDDEPDIR)/bar$(AB_rCD).xyz.pp',
+             '$(MDDEPDIR)/bar$(AB_rCD).xyz.stub: %s/generate-foo.py $(call MERGE_RELATIVE_FILE,localized-input,inner/locales) $(srcdir)/non-localized-input $(if $(IS_LANGUAGE_REPACK),FORCE)' % env.topsrcdir,  # noqa
+             '$(REPORT_BUILD)',
+-            '$(call py_action,file_generate,--locale=$(AB_CD) %s/generate-foo.py main bar$(AB_rCD).xyz $(MDDEPDIR)/bar$(AB_rCD).xyz.pp $(MDDEPDIR)/bar$(AB_rCD).xyz.stub $(call MERGE_RELATIVE_FILE,localized-input,inner/locales) $(srcdir)/non-localized-input)' % env.topsrcdir,  # noqa
++            '$(call py3_action,file_generate,--locale=$(AB_CD) %s/generate-foo.py main bar$(AB_rCD).xyz $(MDDEPDIR)/bar$(AB_rCD).xyz.pp $(MDDEPDIR)/bar$(AB_rCD).xyz.stub $(call MERGE_RELATIVE_FILE,localized-input,inner/locales) $(srcdir)/non-localized-input)' % env.topsrcdir,  # noqa
+             '@$(TOUCH) $@',
+             '',
+             'zot$(AB_rCD).xyz: $(MDDEPDIR)/zot$(AB_rCD).xyz.stub ;',
+@@ -561,7 +561,7 @@ class TestRecursiveMakeBackend(BackendTester):
+             'EXTRA_MDDEPEND_FILES += $(MDDEPDIR)/zot$(AB_rCD).xyz.pp',
+             '$(MDDEPDIR)/zot$(AB_rCD).xyz.stub: %s/generate-foo.py $(call MERGE_RELATIVE_FILE,localized-input,locales) $(srcdir)/non-localized-input $(if $(IS_LANGUAGE_REPACK),FORCE)' % env.topsrcdir,  # noqa
+             '$(REPORT_BUILD)',
+-            '$(call py_action,file_generate,--locale=$(AB_CD) %s/generate-foo.py main zot$(AB_rCD).xyz $(MDDEPDIR)/zot$(AB_rCD).xyz.pp $(MDDEPDIR)/zot$(AB_rCD).xyz.stub $(call MERGE_RELATIVE_FILE,localized-input,locales) $(srcdir)/non-localized-input)' % env.topsrcdir,  # noqa
++            '$(call py3_action,file_generate,--locale=$(AB_CD) %s/generate-foo.py main zot$(AB_rCD).xyz $(MDDEPDIR)/zot$(AB_rCD).xyz.pp $(MDDEPDIR)/zot$(AB_rCD).xyz.stub $(call MERGE_RELATIVE_FILE,localized-input,locales) $(srcdir)/non-localized-input)' % env.topsrcdir,  # noqa
+             '@$(TOUCH) $@',
+             '',
+         ]
+diff --git a/security/apps/moz.build b/security/apps/moz.build
+index 8b4788b03acc..b1be28ae0db7 100644
+--- a/security/apps/moz.build
++++ b/security/apps/moz.build
+@@ -47,4 +47,5 @@ headers_arrays_certs = [
+ 
+ for header, array_name, cert in headers_arrays_certs:
+     GeneratedFile(header, script='gen_cert_header.py',
++                  py2=True,
+                   entry_point=array_name, inputs=[cert])
+diff --git a/security/ct/tests/gtest/moz.build b/security/ct/tests/gtest/moz.build
+index aeca759a7bf8..7a8b8f20f321 100644
+--- a/security/ct/tests/gtest/moz.build
++++ b/security/ct/tests/gtest/moz.build
+@@ -13,6 +13,7 @@ def STHTestFile(name):
+     props = GENERATED_FILES[name]
+     props.script = 'createSTHTestData.py'
+     props.inputs = ['%s.tbs' % name]
++    props.py2 = True
+ 
+ STHTestFile('valid-sth.inc')
+ STHTestFile('valid-with-extension-sth.inc')
+diff --git a/security/manager/ssl/moz.build b/security/manager/ssl/moz.build
+index e2b04f67f39a..1c1aa149c603 100644
+--- a/security/manager/ssl/moz.build
++++ b/security/manager/ssl/moz.build
+@@ -226,6 +226,7 @@ LOCAL_INCLUDES += [
+ 
+ GeneratedFile('nsSTSPreloadList.h',
+               script='../../../xpcom/ds/tools/make_dafsa.py',
++              py2=True,
+               inputs=['nsSTSPreloadList.inc'])
+ 
+ DEFINES['SSL_DISABLE_DEPRECATED_CIPHER_SUITE_NAMES'] = 'True'
+diff --git a/security/manager/ssl/tests/unit/test_signed_apps/moz.build b/security/manager/ssl/tests/unit/test_signed_apps/moz.build
+index 7d6fdca2861f..8a276704f149 100644
+--- a/security/manager/ssl/tests/unit/test_signed_apps/moz.build
++++ b/security/manager/ssl/tests/unit/test_signed_apps/moz.build
+@@ -14,6 +14,7 @@ def SignedAppFile(name, flags, app_directory='app/'):
+     props.script = '/security/manager/ssl/tests/unit/sign_app.py'
+     props.inputs = [app_directory]
+     props.flags = flags
++    props.py2 = True
+     # Turn RELATIVEDIR into list entry: like
+     # 'security/manager/ssl/tests/unit/test_signed_apps' ->
+     # TEST_HARNESS_FILES.xpcshell.security.manager.ssl.tests.unit.test_signed_apps.
+diff --git a/toolkit/components/featuregates/moz.build b/toolkit/components/featuregates/moz.build
+index aedbbfa57279..cb756d8ecfc6 100644
+--- a/toolkit/components/featuregates/moz.build
++++ b/toolkit/components/featuregates/moz.build
+@@ -15,4 +15,5 @@ PYTHON_UNITTEST_MANIFESTS += ['test/python/python.ini']
+ JAR_MANIFESTS += ['jar.mn']
+ 
+ GeneratedFile('feature_definitions.json', script='gen_feature_definitions.py',
++              py2=True,
+               inputs=['Features.toml'])
+diff --git a/toolkit/components/normandy/test/browser/moz.build b/toolkit/components/normandy/test/browser/moz.build
+index b65d07719760..7e91dd787efb 100644
+--- a/toolkit/components/normandy/test/browser/moz.build
++++ b/toolkit/components/normandy/test/browser/moz.build
+@@ -21,5 +21,6 @@ for addon in addons:
+     GENERATED_FILES += [xpi]
+     GENERATED_FILES[xpi].script = '../create_xpi.py'
+     GENERATED_FILES[xpi].inputs = [indir]
++    GENERATED_FILES[xpi].py2 = True
+ 
+     output_dir += ['!%s' % xpi]
+diff --git a/toolkit/components/telemetry/moz.build b/toolkit/components/telemetry/moz.build
+index c89075c2b38c..77e70b836f8e 100644
+--- a/toolkit/components/telemetry/moz.build
++++ b/toolkit/components/telemetry/moz.build
+@@ -148,12 +148,15 @@ if CONFIG['MOZ_TELEMETRY_EXTRA_HISTOGRAM_FILES']:
+ 
+ GeneratedFile('TelemetryHistogramData.inc',
+               script='build_scripts/gen_histogram_data.py',
++              py2=True,
+               inputs=histogram_files)
+ GeneratedFile('TelemetryHistogramEnums.h',
+               script='build_scripts/gen_histogram_enum.py',
++              py2=True,
+               inputs=histogram_files)
+ GeneratedFile('TelemetryHistogramNameMap.h',
+               script='build_scripts/gen_histogram_phf.py',
++              py2=True,
+               inputs=histogram_files)
+ 
+ # Generate scalar files.
+@@ -165,9 +168,11 @@ if CONFIG['MOZ_TELEMETRY_EXTRA_SCALAR_FILES']:
+ 
+ GeneratedFile('TelemetryScalarData.h',
+               script='build_scripts/gen_scalar_data.py',
++              py2=True,
+               inputs=scalar_files)
+ GeneratedFile('TelemetryScalarEnums.h',
+               script='build_scripts/gen_scalar_enum.py',
++              py2=True,
+               inputs=scalar_files)
+ 
+ # Generate the JSON scalar definitions. They will only be
+@@ -175,6 +180,7 @@ GeneratedFile('TelemetryScalarEnums.h',
+ GeneratedFile(
+     'ScalarArtifactDefinitions.json',
+     script='build_scripts/gen_scalar_data.py',
++    py2=True,
+     entry_point='generate_JSON_definitions',
+     inputs=scalar_files)
+ 
+@@ -189,15 +195,18 @@ if CONFIG['MOZ_TELEMETRY_EXTRA_EVENT_FILES']:
+     event_files.extend(CONFIG['MOZ_TELEMETRY_EXTRA_EVENT_FILES'])
+ 
+ GeneratedFile('TelemetryEventData.h', script='build_scripts/gen_event_data.py',
++              py2=True,
+               inputs=event_files)
+ 
+ GeneratedFile('TelemetryEventEnums.h', script='build_scripts/gen_event_enum.py',
++              py2=True,
+               inputs=event_files)
+ 
+ # Generate the JSON event definitions. They will only be
+ # used in artifact or "build faster" builds.
+ GeneratedFile('EventArtifactDefinitions.json',
+               script='build_scripts/gen_event_data.py',
++              py2=True,
+               entry_point='generate_JSON_definitions', inputs=event_files)
+ 
+ # Move the events JSON file to the directory where the Firefox binary is.
+@@ -210,11 +219,13 @@ processes_files = [
+ 
+ GeneratedFile('TelemetryProcessEnums.h',
+               script='build_scripts/gen_process_enum.py',
++              py2=True,
+               inputs=processes_files)
+ 
+ 
+ GeneratedFile('TelemetryProcessData.h',
+               script='build_scripts/gen_process_data.py',
++              py2=True,
+               inputs=processes_files)
+ 
+ # Add support for GeckoView: please note that building GeckoView
+diff --git a/toolkit/crashreporter/moz.build b/toolkit/crashreporter/moz.build
+index 3d4334dc976c..0253e1eff3fb 100644
+--- a/toolkit/crashreporter/moz.build
++++ b/toolkit/crashreporter/moz.build
+@@ -129,6 +129,7 @@ else:
+ 
+ # Generate CrashAnnotations.h
+ GeneratedFile('CrashAnnotations.h', script='generate_crash_reporter_sources.py',
++              py2=True,
+               entry_point='emit_header', inputs=[
+                   'CrashAnnotations.h.in',
+                   'CrashAnnotations.yaml',
+diff --git a/toolkit/library/build/moz.build b/toolkit/library/build/moz.build
+index fb5d0b32a6f2..bfb6a75882df 100644
+--- a/toolkit/library/build/moz.build
++++ b/toolkit/library/build/moz.build
+@@ -25,5 +25,6 @@ if CONFIG['COMPILE_ENVIRONMENT']:
+         )
+     GeneratedFile('dependentlibs.list', 'dependentlibs.list.gtest',
+                   script='dependentlibs.py', entry_point='gen_list',
++                  py2=True,
+                   inputs=['!%s' % full_libname])
+     FINAL_TARGET_FILES += ['!dependentlibs.list', '!dependentlibs.list.gtest']
+diff --git a/toolkit/library/moz.build b/toolkit/library/moz.build
+index af8400f4931f..feb59204c7fe 100644
+--- a/toolkit/library/moz.build
++++ b/toolkit/library/moz.build
+@@ -85,6 +85,7 @@ def Libxul(name, output_category=None):
+     if CONFIG['OS_ARCH'] == 'Linux' and CONFIG['OS_TARGET'] != 'Android':
+         GeneratedFile('symverscript', script='/build/gen_symverscript.py',
+                       inputs=['../symverscript.in'],
++                      py2=True,
+                       flags=['xul%s' % CONFIG['MOZILLA_SYMBOLVERSION']])
+         SYMBOLS_FILE = '!symverscript'
+ 
+@@ -375,5 +376,6 @@ else:
+     libxul_list = '%sxul_%s' % (
+         CONFIG['DLL_PREFIX'], CONFIG['DLL_SUFFIX'].lstrip('.').replace('.','_'))
+ GeneratedFile('buildid.cpp', script = 'gen_buildid.py',
++              py2=True,
+               inputs=['!build/%s.list' % libxul_list])
+ 
+diff --git a/toolkit/locales/moz.build b/toolkit/locales/moz.build
+index 12b9f4f86547..6dbab5c0c1ce 100644
+--- a/toolkit/locales/moz.build
++++ b/toolkit/locales/moz.build
+@@ -15,7 +15,7 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'gtk':
+ 
+ JAR_MANIFESTS += ['jar.mn']
+ 
+-GeneratedFile('multilocale.txt', script='gen_multilocale.py')
++GeneratedFile('multilocale.txt', script='gen_multilocale.py', py2=True)
+ FINAL_TARGET_FILES.res += [
+     '!multilocale.txt',
+ ]
+@@ -34,4 +34,5 @@ if CONFIG['MOZ_CRASHREPORTER']:
+ LOCALIZED_GENERATED_FILES += ['update.locale']
+ update_locale = LOCALIZED_GENERATED_FILES['update.locale']
+ update_locale.script = 'generate_update_locale.py'
++update_locale.py2 = True
+ LOCALIZED_FILES += ['!update.locale']
+diff --git a/toolkit/mozapps/extensions/moz.build b/toolkit/mozapps/extensions/moz.build
+index f16056dda359..4e0a62c44122 100644
+--- a/toolkit/mozapps/extensions/moz.build
++++ b/toolkit/mozapps/extensions/moz.build
+@@ -32,6 +32,7 @@ built_in_addons = 'built_in_addons.json'
+ GENERATED_FILES += [built_in_addons]
+ manifest = GENERATED_FILES[built_in_addons]
+ manifest.script = 'gen_built_in_addons.py'
++manifest.py2 = True
+ 
+ if CONFIG['MOZ_BUILD_APP'] == 'browser':
+     manifest.flags = ['--features=browser/features']
+diff --git a/toolkit/mozapps/extensions/test/browser/moz.build b/toolkit/mozapps/extensions/test/browser/moz.build
+index bf99a940a579..f88a02a05e4e 100644
+--- a/toolkit/mozapps/extensions/test/browser/moz.build
++++ b/toolkit/mozapps/extensions/test/browser/moz.build
+@@ -26,6 +26,7 @@ for addon in addons:
+     GENERATED_FILES += [xpi]
+     GENERATED_FILES[xpi].script = '../create_xpi.py'
+     GENERATED_FILES[xpi].inputs = [indir]
++    GENERATED_FILES[xpi].py2 = True
+ 
+     output_dir += ['!%s' % xpi]
+ 
+diff --git a/toolkit/mozapps/update/updater/moz.build b/toolkit/mozapps/update/updater/moz.build
+index a0eff9a3b7cd..c0d343f27275 100644
+--- a/toolkit/mozapps/update/updater/moz.build
++++ b/toolkit/mozapps/update/updater/moz.build
+@@ -49,6 +49,12 @@ xpcshell_cert.script = 'gen_cert_header.py:create_header'
+ dep1_cert.script = 'gen_cert_header.py:create_header'
+ dep2_cert.script = 'gen_cert_header.py:create_header'
+ 
++primary_cert.py2 = True
++secondary_cert.py2 = True
++xpcshell_cert.py2 = True
++dep1_cert.py2 = True
++dep2_cert.py2 = True
++
+ if CONFIG['MOZ_UPDATE_CHANNEL'] in ('beta', 'release', 'esr'):
+     primary_cert.inputs += ['release_primary.der']
+     secondary_cert.inputs += ['release_secondary.der']
+diff --git a/widget/android/bindings/moz.build b/widget/android/bindings/moz.build
+index 02b726af564b..a1df93fd571f 100644
+--- a/widget/android/bindings/moz.build
++++ b/widget/android/bindings/moz.build
+@@ -40,6 +40,7 @@ t = tuple(['sdk_bindings'] +
+ GENERATED_FILES += [t]
+ GENERATED_FILES[t].script = '/mobile/android/gradle.py:generate_sdk_bindings'
+ GENERATED_FILES[t].inputs += ['%s-classes.txt' % stem for stem in generated]
++GENERATED_FILES[t].py2 = True
+ 
+ FINAL_LIBRARY = 'xul'
+ 
+diff --git a/widget/android/moz.build b/widget/android/moz.build
+index 3a50789d7679..dfd2f359331e 100644
+--- a/widget/android/moz.build
++++ b/widget/android/moz.build
+@@ -82,6 +82,7 @@ include('/ipc/chromium/chromium-config.mozbuild')
+ GeneratedFile(
+     'generated_jni_wrappers', 'GeneratedJNINatives.h', 'GeneratedJNIWrappers.h',
+     'GeneratedJNIWrappers.cpp', script='/mobile/android/gradle.py',
++    py2=True,
+     entry_point='generate_generated_jni_wrappers')
+ 
+ FINAL_LIBRARY = 'xul'
+diff --git a/xpcom/base/moz.build b/xpcom/base/moz.build
+index c5175110e745..133fdd6edd52 100644
+--- a/xpcom/base/moz.build
++++ b/xpcom/base/moz.build
+@@ -202,10 +202,12 @@ if CONFIG['OS_TARGET'] == 'WINNT':
+         'MemoryInfo.cpp',
+     ]
+ 
+-GeneratedFile("ErrorList.h", script="ErrorList.py", entry_point="error_list_h")
++GeneratedFile("ErrorList.h", script="ErrorList.py", entry_point="error_list_h", py2=True)
+ GeneratedFile("ErrorNamesInternal.h", script="ErrorList.py",
++              py2=True,
+               entry_point="error_names_internal_h")
+ GeneratedFile("error_list.rs", script="ErrorList.py",
++              py2=True,
+               entry_point="error_list_rs")
+ 
+ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
+@@ -224,6 +226,7 @@ if CONFIG['COMPILE_ENVIRONMENT']:
+ 
+     GeneratedFile('gk_rust_utils_ffi_generated.h',
+                   script='/layout/style/RunCbindgen.py',
++                  py2=True,
+                   entry_point='generate', inputs=['/xpcom/rust/gkrust_utils'])
+ 
+ include('/ipc/chromium/chromium-config.mozbuild')
+diff --git a/xpcom/build/moz.build b/xpcom/build/moz.build
+index d8674b3c29fb..4ce521a741ad 100755
+--- a/xpcom/build/moz.build
++++ b/xpcom/build/moz.build
+@@ -70,9 +70,9 @@ if CONFIG['OS_ARCH'] != 'WINNT':
+         'NSPRInterposer.cpp',
+     ]
+ 
+-GeneratedFile('Services.cpp', script='Services.py', entry_point='services_cpp')
+-GeneratedFile('Services.h', script='Services.py', entry_point='services_h')
+-GeneratedFile('services.rs', script='Services.py', entry_point='services_rs')
++GeneratedFile('Services.cpp', script='Services.py', entry_point='services_cpp', py2=True)
++GeneratedFile('Services.h', script='Services.py', entry_point='services_h', py2=True)
++GeneratedFile('services.rs', script='Services.py', entry_point='services_rs', py2=True)
+ 
+ include('/ipc/chromium/chromium-config.mozbuild')
+ 
+diff --git a/xpcom/components/moz.build b/xpcom/components/moz.build
+index 9505e78e738c..31cd44ff636f 100644
+--- a/xpcom/components/moz.build
++++ b/xpcom/components/moz.build
+@@ -41,6 +41,7 @@ if CONFIG['COMPILE_ENVIRONMENT']:
+     GeneratedFile(
+         'Components.h', 'StaticComponentData.h', 'StaticComponents.cpp',
+         script='gen_static_components.py',
++        py2=True,
+         inputs=['!manifest-lists.json', 'StaticComponents.cpp.in'])
+ 
+ UNIFIED_SOURCES += [
+diff --git a/xpcom/ds/moz.build b/xpcom/ds/moz.build
+index 5408d7fca2c3..0de4c9f64417 100644
+--- a/xpcom/ds/moz.build
++++ b/xpcom/ds/moz.build
+@@ -135,10 +135,12 @@ LOCAL_INCLUDES += [
+ ]
+ 
+ GeneratedFile('nsGkAtomList.h', script='StaticAtoms.py',
++              py2=True,
+               entry_point='generate_nsgkatomlist_h',
+               inputs=['Atom.py', 'HTMLAtoms.py'])
+ 
+ GeneratedFile('nsGkAtomConsts.h', script='StaticAtoms.py',
++              py2=True,
+               entry_point='generate_nsgkatomconsts_h',
+               inputs=['Atom.py', 'HTMLAtoms.py'])
+ 
+diff --git a/xpcom/idl-parser/xpidl/moz.build b/xpcom/idl-parser/xpidl/moz.build
+index a642fe4d712a..a741e38f5d94 100644
+--- a/xpcom/idl-parser/xpidl/moz.build
++++ b/xpcom/idl-parser/xpidl/moz.build
+@@ -9,4 +9,5 @@ PYTHON_UNITTEST_MANIFESTS += [
+ ]
+ 
+ GeneratedFile('xpidl.stub', 'xpidllex.py', 'xpidlyacc.py', script='header.py',
++              py2=True,
+               entry_point='main')
+diff --git a/xpcom/reflect/xptcall/md/win32/moz.build b/xpcom/reflect/xptcall/md/win32/moz.build
+index 783d1845b133..b2831cf81892 100644
+--- a/xpcom/reflect/xptcall/md/win32/moz.build
++++ b/xpcom/reflect/xptcall/md/win32/moz.build
+@@ -50,6 +50,7 @@ elif CONFIG['CPU_ARCH'] == 'aarch64':
+     for src in asm_files:
+         obj = src.replace('_asm_aarch64', '')
+         GeneratedFile(obj, script='preprocess.py', entry_point='preprocess',
++                      py2=True,
+                       inputs=[src])
+         SOURCES += ['!%s' % obj]
+ 
+diff --git a/xpcom/tests/gtest/moz.build b/xpcom/tests/gtest/moz.build
+index 220d2134fa71..76a04f53d510 100644
+--- a/xpcom/tests/gtest/moz.build
++++ b/xpcom/tests/gtest/moz.build
+@@ -119,6 +119,7 @@ LOCAL_INCLUDES += [
+ 
+ GeneratedFile('dafsa_test_1.inc',
+               script='../../ds/tools/make_dafsa.py',
++              py2=True,
+               inputs=['dafsa_test_1.dat'])
+ 
+ TEST_HARNESS_FILES.gtest += [

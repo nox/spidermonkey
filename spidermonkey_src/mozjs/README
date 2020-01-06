@@ -1,0 +1,8 @@
+This directory contains SpiderMonkey 74.
+
+This release is based on a revision of Mozilla 74:
+  https://hg.mozilla.org/releases/
+The changes in the patches/ directory were applied.
+
+MDN hosts the latest SpiderMonkey 74 release notes:
+  https://developer.mozilla.org/en-US/docs/SpiderMonkey/74

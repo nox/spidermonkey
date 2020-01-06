@@ -1,0 +1,44 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Chris Manchester <cmanchester@mozilla.com>
+Date: Tue, 11 Feb 2020 21:51:48 +0000
+Subject: [PATCH] Bug 1613823 - Add a pairwise function based on itertools to
+ mozbuild.util. r=firefox-build-system-reviewers,rstewart
+
+Differential Revision: https://phabricator.services.mozilla.com/D62070
+
+--HG--
+extra : moz-landing-system : lando
+
+diff --git a/python/mozbuild/mozbuild/util.py b/python/mozbuild/mozbuild/util.py
+index 34261b9ff788..b952266fb63b 100644
+--- a/python/mozbuild/mozbuild/util.py
++++ b/python/mozbuild/mozbuild/util.py
+@@ -14,6 +14,7 @@ import difflib
+ import errno
+ import functools
+ import hashlib
++import itertools
+ import os
+ import pprint
+ import re
+@@ -1195,6 +1196,20 @@ def pair(iterable):
+     return six.moves.zip_longest(i, i)
+ 
+ 
++def pairwise(iterable):
++    '''Given an iterable, returns an iterable of overlapped pairs of
++    its items. Based on the Python itertools documentation.
++
++    For example,
++        list(pairwise([1,2,3,4,5,6]))
++    returns
++        [(1,2), (2,3), (3,4), (4,5), (5,6)]
++    '''
++    a, b = itertools.tee(iterable)
++    next(b, None)
++    return zip(a, b)
++
++
+ VARIABLES_RE = re.compile('\$\((\w+)\)')
+ 
+ 

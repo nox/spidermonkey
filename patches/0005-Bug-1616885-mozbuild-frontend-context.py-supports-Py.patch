@@ -1,0 +1,270 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ricky Stewart <rstewart@mozilla.com>
+Date: Thu, 27 Feb 2020 16:22:16 +0000
+Subject: [PATCH] Bug 1616885 - mozbuild/frontend/context.py supports Python 3
+ r=firefox-build-system-reviewers,mshal
+
+Differential Revision: https://phabricator.services.mozilla.com/D63520
+
+--HG--
+extra : moz-landing-system : lando
+
+diff --git a/python/mozbuild/mozbuild/frontend/context.py b/python/mozbuild/mozbuild/frontend/context.py
+index 17fb321e8a30..c93ae80bb021 100644
+--- a/python/mozbuild/mozbuild/frontend/context.py
++++ b/python/mozbuild/mozbuild/frontend/context.py
+@@ -16,6 +16,7 @@ contain, you've come to the right place.
+ 
+ from __future__ import absolute_import, print_function, unicode_literals
+ 
++import operator
+ import os
+ 
+ from collections import (
+@@ -647,9 +648,9 @@ def Enum(*values):
+ class PathMeta(type):
+     """Meta class for the Path family of classes.
+ 
+-    It handles calling __new__ and __init__ with the right arguments
+-    in cases where a Path is instantiated with another instance of
+-    Path instead of having received a context.
++    It handles calling __new__ with the right arguments in cases where a Path
++    is instantiated with another instance of Path instead of having received a
++    context.
+ 
+     It also makes Path(context, value) instantiate one of the
+     subclasses depending on the value, allowing callers to do
+@@ -675,7 +676,7 @@ class PathMeta(type):
+         return super(PathMeta, cls).__call__(context, value)
+ 
+ 
+-class Path(ContextDerivedValue, six.text_type):
++class Path(six.with_metaclass(PathMeta, ContextDerivedValue, six.text_type)):
+     """Stores and resolves a source path relative to a given context
+ 
+     This class is used as a backing type for some of the sandbox variables.
+@@ -686,16 +687,11 @@ class Path(ContextDerivedValue, six.text_type):
+       - '!objdir/relative/paths'
+       - '%/filesystem/absolute/paths'
+     """
+-    __metaclass__ = PathMeta
+-
+     def __new__(cls, context, value=None):
+-        return super(Path, cls).__new__(cls, value)
+-
+-    def __init__(self, context, value=None):
+-        # Only subclasses should be instantiated.
+-        assert self.__class__ != Path
++        self = super(Path, cls).__new__(cls, value)
+         self.context = context
+         self.srcdir = context.srcdir
++        return self
+ 
+     def join(self, *p):
+         """ContextDerived equivalent of mozpath.join(self, *p), returning a
+@@ -708,35 +704,28 @@ class Path(ContextDerivedValue, six.text_type):
+         # switch from Python 2 to 3.
+         raise AssertionError()
+ 
+-    def __eq__(self, other):
++    def _cmp(self, other, op):
+         if isinstance(other, Path) and self.srcdir != other.srcdir:
+-            return self.full_path == other.full_path
+-        return six.text_type(self) == other
++            return op(self.full_path, other.full_path)
++        return op(six.text_type(self), other)
++
++    def __eq__(self, other):
++        return self._cmp(other, operator.eq)
+ 
+     def __ne__(self, other):
+-        if isinstance(other, Path) and self.srcdir != other.srcdir:
+-            return self.full_path != other.full_path
+-        return six.text_type(self) != other
++        return self._cmp(other, operator.ne)
+ 
+     def __lt__(self, other):
+-        if isinstance(other, Path) and self.srcdir != other.srcdir:
+-            return self.full_path < other.full_path
+-        return six.text_type(self) < other
++        return self._cmp(other, operator.lt)
+ 
+     def __gt__(self, other):
+-        if isinstance(other, Path) and self.srcdir != other.srcdir:
+-            return self.full_path > other.full_path
+-        return six.text_type(self) > other
++        return self._cmp(other, operator.gt)
+ 
+     def __le__(self, other):
+-        if isinstance(other, Path) and self.srcdir != other.srcdir:
+-            return self.full_path <= other.full_path
+-        return six.text_type(self) <= other
++        return self._cmp(other, operator.le)
+ 
+     def __ge__(self, other):
+-        if isinstance(other, Path) and self.srcdir != other.srcdir:
+-            return self.full_path >= other.full_path
+-        return six.text_type(self) >= other
++        return self._cmp(other, operator.ge)
+ 
+     def __repr__(self):
+         return '<%s (%s)%s>' % (self.__class__.__name__, self.srcdir, self)
+@@ -752,12 +741,12 @@ class Path(ContextDerivedValue, six.text_type):
+ class SourcePath(Path):
+     """Like Path, but limited to paths in the source directory."""
+ 
+-    def __init__(self, context, value):
++    def __new__(cls, context, value=None):
+         if value.startswith('!'):
+             raise ValueError('Object directory paths are not allowed')
+         if value.startswith('%'):
+             raise ValueError('Filesystem absolute paths are not allowed')
+-        super(SourcePath, self).__init__(context, value)
++        self = super(SourcePath, cls).__new__(cls, context, value)
+ 
+         if value.startswith('/'):
+             path = None
+@@ -772,6 +761,7 @@ class SourcePath(Path):
+         else:
+             path = mozpath.join(self.srcdir, value)
+         self.full_path = mozpath.normpath(path)
++        return self
+ 
+     @memoized_property
+     def translated(self):
+@@ -793,10 +783,12 @@ class RenamedSourcePath(SourcePath):
+     and is not supported by the RecursiveMake backend.
+     """
+ 
+-    def __init__(self, context, value):
++    def __new__(cls, context, value):
+         assert isinstance(value, tuple)
+-        source, self._target_basename = value
+-        super(RenamedSourcePath, self).__init__(context, source)
++        source, target_basename = value
++        self = super(RenamedSourcePath, cls).__new__(cls, context, source)
++        self._target_basename = target_basename
++        return self
+ 
+     @property
+     def target_basename(self):
+@@ -806,29 +798,30 @@ class RenamedSourcePath(SourcePath):
+ class ObjDirPath(Path):
+     """Like Path, but limited to paths in the object directory."""
+ 
+-    def __init__(self, context, value=None):
++    def __new__(cls, context, value=None):
+         if not value.startswith('!'):
+             raise ValueError('Object directory paths must start with ! prefix')
+-        super(ObjDirPath, self).__init__(context, value)
++        self = super(ObjDirPath, cls).__new__(cls, context, value)
+ 
+         if value.startswith('!/'):
+             path = mozpath.join(context.config.topobjdir, value[2:])
+         else:
+             path = mozpath.join(context.objdir, value[1:])
+         self.full_path = mozpath.normpath(path)
++        return self
+ 
+ 
+ class AbsolutePath(Path):
+     """Like Path, but allows arbitrary paths outside the source and object directories."""
+ 
+-    def __init__(self, context, value=None):
++    def __new__(cls, context, value=None):
+         if not value.startswith('%'):
+             raise ValueError('Absolute paths must start with % prefix')
+         if not os.path.isabs(value[1:]):
+             raise ValueError('Path \'%s\' is not absolute' % value[1:])
+-        super(AbsolutePath, self).__init__(context, value)
+-
++        self = super(AbsolutePath, cls).__new__(cls, context, value)
+         self.full_path = mozpath.normpath(value[1:])
++        return self
+ 
+ 
+ @memoize
+diff --git a/python/mozbuild/mozbuild/test/frontend/test_context.py b/python/mozbuild/mozbuild/test/frontend/test_context.py
+index ef0f8fca774b..58700f1f9003 100644
+--- a/python/mozbuild/mozbuild/test/frontend/test_context.py
++++ b/python/mozbuild/mozbuild/test/frontend/test_context.py
+@@ -2,9 +2,10 @@
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+-from __future__ import absolute_import, print_function
++from __future__ import absolute_import, print_function, unicode_literals
+ 
+ import os
++import six
+ import unittest
+ 
+ from mozunit import main
+@@ -38,7 +39,7 @@ class TestContext(unittest.TestCase):
+             'baz': (dict, dict, ''),
+         })
+ 
+-        self.assertEqual(test.keys(), [])
++        self.assertEqual(list(test), [])
+ 
+         self.assertEqual(test['foo'], 0)
+ 
+@@ -86,12 +87,12 @@ class TestContext(unittest.TestCase):
+             'baz': (dict, list, ''),
+         })
+ 
+-        self.assertEqual(test.keys(), [])
++        self.assertEqual(list(test), [])
+ 
+         with self.assertRaises(ValueError):
+             test.update(bar=True, foo={})
+ 
+-        self.assertEqual(test.keys(), [])
++        self.assertEqual(list(test), [])
+ 
+         test.update(bar=True, foo=1)
+ 
+@@ -635,7 +636,7 @@ class TestPaths(unittest.TestCase):
+ class TestTypedRecord(unittest.TestCase):
+ 
+     def test_fields(self):
+-        T = ContextDerivedTypedRecord(('field1', unicode),
++        T = ContextDerivedTypedRecord(('field1', six.text_type),
+                                       ('field2', list))
+         inst = T(None)
+         self.assertEqual(inst.field1, '')
+@@ -651,7 +652,7 @@ class TestTypedRecord(unittest.TestCase):
+             inst.field3 = []
+ 
+     def test_coercion(self):
+-        T = ContextDerivedTypedRecord(('field1', unicode),
++        T = ContextDerivedTypedRecord(('field1', six.text_type),
+                                       ('field2', list))
+         inst = T(None)
+         inst.field1 = 3
+diff --git a/python/mozbuild/mozbuild/test/python.ini b/python/mozbuild/mozbuild/test/python.ini
+index 90e8eae2b5ba..562ef32e789e 100644
+--- a/python/mozbuild/mozbuild/test/python.ini
++++ b/python/mozbuild/mozbuild/test/python.ini
+@@ -12,6 +12,8 @@ subsuite = mozbuild
+ [configure/test_util.py]
+ [controller/test_ccachestats.py]
+ [controller/test_clobber.py]
++[frontend/test_context.py]
++[frontend/test_namespaces.py]
+ [test_artifact_cache.py]
+ [test_base.py]
+ [test_containers.py]
+diff --git a/python/mozbuild/mozbuild/test/python2.ini b/python/mozbuild/mozbuild/test/python2.ini
+index 6623b9d7ddd3..07fe58f76b7a 100644
+--- a/python/mozbuild/mozbuild/test/python2.ini
++++ b/python/mozbuild/mozbuild/test/python2.ini
+@@ -20,8 +20,6 @@ skip-if = (os == "win")
+ [compilation/test_warnings.py]
+ [configure/lint.py]
+ [configure/test_lint.py]
+-[frontend/test_context.py]
+ [frontend/test_emitter.py]
+-[frontend/test_namespaces.py]
+ [frontend/test_reader.py]
+ [frontend/test_sandbox.py]

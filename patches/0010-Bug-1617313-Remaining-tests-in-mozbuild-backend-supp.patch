@@ -1,0 +1,226 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ricky Stewart <rstewart@mozilla.com>
+Date: Thu, 27 Feb 2020 16:22:18 +0000
+Subject: [PATCH] Bug 1617313 - Remaining tests in mozbuild/backend support
+ Python 3 r=firefox-build-system-reviewers,mshal
+
+Differential Revision: https://phabricator.services.mozilla.com/D63908
+
+--HG--
+extra : moz-landing-system : lando
+
+diff --git a/python/mozbuild/mozbuild/action/buildlist.py b/python/mozbuild/mozbuild/action/buildlist.py
+index ab9b90bbf125..69a402e2a501 100644
+--- a/python/mozbuild/mozbuild/action/buildlist.py
++++ b/python/mozbuild/mozbuild/action/buildlist.py
+@@ -7,8 +7,9 @@ if the entry does not already exist.
+ 
+ Usage: buildlist.py <filename> <entry> [<entry> ...]
+ '''
+-from __future__ import absolute_import, print_function
++from __future__ import absolute_import, print_function, unicode_literals
+ 
++import io
+ import sys
+ import os
+ 
+@@ -23,10 +24,10 @@ def addEntriesToListFile(listFile, entries):
+     add each entry in |entries| to the file, unless it is already
+     present."""
+     ensureParentDir(listFile)
+-    lock = lock_file(listFile + ".lck")
++    lock = lock_file(listFile + '.lck')
+     try:
+         if os.path.exists(listFile):
+-            f = open(listFile)
++            f = io.open(listFile)
+             existing = set(x.strip() for x in f.readlines())
+             f.close()
+         else:
+@@ -34,8 +35,8 @@ def addEntriesToListFile(listFile, entries):
+         for e in entries:
+             if e not in existing:
+                 existing.add(e)
+-        with open(listFile, 'wb') as f:
+-            f.write("\n".join(sorted(existing))+"\n")
++        with io.open(listFile, 'w', newline='\n') as f:
++            f.write('\n'.join(sorted(existing)) + '\n')
+     finally:
+         del lock  # Explicitly release the lock_file to free it
+ 
+diff --git a/python/mozbuild/mozbuild/backend/configenvironment.py b/python/mozbuild/mozbuild/backend/configenvironment.py
+index 1770aa2c247e..20d1a9fa69da 100644
+--- a/python/mozbuild/mozbuild/backend/configenvironment.py
++++ b/python/mozbuild/mozbuild/backend/configenvironment.py
+@@ -237,7 +237,8 @@ class PartialConfigDict(object):
+     def _write_file(self, key, value):
+         filename = mozpath.join(self._datadir, key)
+         with FileAvoidWrite(filename) as fh:
+-            json.dump(value, fh, indent=4, encoding=system_encoding)
++            to_write = json.dumps(value, indent=4)
++            fh.write(to_write.encode(system_encoding))
+         return filename
+ 
+     def _fill_group(self, values):
+@@ -251,7 +252,7 @@ class PartialConfigDict(object):
+         existing_files = self._load_config_track()
+ 
+         new_files = set()
+-        for k, v in values.iteritems():
++        for k, v in six.iteritems(values):
+             new_files.add(self._write_file(k, v))
+ 
+         for filename in existing_files - new_files:
+diff --git a/python/mozbuild/mozbuild/frontend/sandbox.py b/python/mozbuild/mozbuild/frontend/sandbox.py
+index 007e1e3abc6a..f8cd7dcd4395 100644
+--- a/python/mozbuild/mozbuild/frontend/sandbox.py
++++ b/python/mozbuild/mozbuild/frontend/sandbox.py
+@@ -35,12 +35,12 @@ from mozpack.files import FileFinder
+ default_finder = FileFinder('/')
+ 
+ 
+-def alphabetical_sorted(iterable, cmp=None, key=lambda x: x.lower(),
++def alphabetical_sorted(iterable, key=lambda x: x.lower(),
+                         reverse=False):
+     """sorted() replacement for the sandbox, ordering alphabetically by
+     default.
+     """
+-    return sorted(iterable, cmp, key, reverse)
++    return sorted(iterable, key=key, reverse=reverse)
+ 
+ 
+ class SandboxError(Exception):
+diff --git a/python/mozbuild/mozbuild/gn_processor.py b/python/mozbuild/mozbuild/gn_processor.py
+index ce3cec4a3874..b9d841c292c1 100644
+--- a/python/mozbuild/mozbuild/gn_processor.py
++++ b/python/mozbuild/mozbuild/gn_processor.py
+@@ -2,16 +2,16 @@
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+-from __future__ import absolute_import, print_function
++from __future__ import absolute_import, print_function, unicode_literals
+ 
+ from collections import defaultdict
+ from copy import deepcopy
+ import glob
+ import json
+ import os
++import six
+ import subprocess
+ import sys
+-import types
+ 
+ from mozbuild.backend.base import BuildBackend
+ import mozpack.path as mozpath
+@@ -199,7 +199,7 @@ def process_gn_config(gn_config, srcdir, config, output, non_unified_sources,
+         return path.lstrip('//'), name + '_gn'
+ 
+     # Process all targets from the given gn project and its dependencies.
+-    for target_fullname, spec in targets.iteritems():
++    for target_fullname, spec in six.iteritems(targets):
+ 
+         target_path, target_name = target_info(target_fullname)
+         context_attrs = {}
+@@ -210,7 +210,7 @@ def process_gn_config(gn_config, srcdir, config, output, non_unified_sources,
+         if spec['type'] in ('static_library', 'shared_library', 'source_set'):
+             if name.startswith('lib'):
+                 name = name[3:]
+-            context_attrs['LIBRARY_NAME'] = name.decode('utf-8')
++            context_attrs['LIBRARY_NAME'] = six.ensure_text(name)
+         else:
+             raise Exception('The following GN target type is not currently '
+                             'consumed by moz.build: "%s". It may need to be '
+@@ -298,7 +298,7 @@ def process_gn_config(gn_config, srcdir, config, output, non_unified_sources,
+                     if not f:
+                         continue
+                     # the result may be a string or a list.
+-                    if isinstance(f, types.StringTypes):
++                    if isinstance(f, six.string_types):
+                         context_attrs.setdefault(var, []).append(f)
+                     else:
+                         context_attrs.setdefault(var, []).extend(f)
+@@ -379,7 +379,7 @@ def find_common_attrs(config_attributes):
+     def make_difference(reference, input_attrs):
+         # Modifies `input_attrs` so that after calling this function it contains
+         # no parts it has in common with in `reference`.
+-        for k, input_value in input_attrs.items():
++        for k, input_value in list(six.iteritems(input_attrs)):
+             common_value = reference.get(k)
+             if common_value:
+                 if isinstance(input_value, list):
+@@ -449,7 +449,8 @@ def write_mozbuild(config, srcdir, output, non_unified_sources, gn_config_files,
+                 for args in all_args:
+                     cond = tuple(((k, args.get(k)) for k in attrs))
+                     conditions.add(cond)
+-                for cond in sorted(conditions):
++
++                for cond in conditions:
+                     common_attrs = find_common_attrs([attrs for args, attrs in configs if
+                                                       all(args.get(k) == v for k, v in cond)])
+                     if any(common_attrs.values()):
+@@ -511,7 +512,7 @@ def generate_gn_config(config, srcdir, output, non_unified_sources, gn_binary,
+         return '"%s"' % v
+ 
+     gn_args = '--args=%s' % ' '.join(['%s=%s' % (k, str_for_arg(v)) for k, v
+-                                      in input_variables.iteritems()])
++                                      in six.iteritems(input_variables)])
+     gn_arg_string = '_'.join([str(input_variables[k]) for k in sorted(input_variables.keys())])
+     out_dir = mozpath.join(output, 'gn-output')
+     gen_args = [
+diff --git a/python/mozbuild/mozbuild/test/backend/test_test_manifest.py b/python/mozbuild/mozbuild/test/backend/test_test_manifest.py
+index 4574a3df2e94..fb710c8dc98a 100644
+--- a/python/mozbuild/mozbuild/test/backend/test_test_manifest.py
++++ b/python/mozbuild/mozbuild/test/backend/test_test_manifest.py
+@@ -4,7 +4,7 @@
+ 
+ from __future__ import absolute_import, print_function, unicode_literals
+ 
+-import cPickle as pickle
++import six.moves.cPickle as pickle
+ import os
+ 
+ import mozpack.path as mozpath
+@@ -38,7 +38,7 @@ class TestTestManifestBackend(BackendTester):
+         self.assertTrue(os.path.exists(all_tests_path))
+         test_installs_path = mozpath.join(env.topobjdir, 'test-installs.pkl')
+ 
+-        with open(test_installs_path, 'r') as fh:
++        with open(test_installs_path, 'rb') as fh:
+             test_installs = pickle.load(fh)
+ 
+         self.assertEqual(set(test_installs.keys()),
+diff --git a/python/mozbuild/mozbuild/test/python.ini b/python/mozbuild/mozbuild/test/python.ini
+index b52d2b2f3900..03868bd5c227 100644
+--- a/python/mozbuild/mozbuild/test/python.ini
++++ b/python/mozbuild/mozbuild/test/python.ini
+@@ -3,6 +3,12 @@ subsuite = mozbuild
+ 
+ [backend/test_fastermake.py]
+ [backend/test_recursivemake.py]
++[backend/test_build.py]
++[backend/test_configenvironment.py]
++[backend/test_gn_processor.py]
++[backend/test_partialconfigenvironment.py]
++[backend/test_test_manifest.py]
++[backend/test_visualstudio.py]
+ [configure/test_checks_configure.py]
+ [configure/test_compile_checks.py]
+ [configure/test_configure.py]
+diff --git a/python/mozbuild/mozbuild/test/python2.ini b/python/mozbuild/mozbuild/test/python2.ini
+index 1ca14bcc6e5b..23db8dad2e1e 100644
+--- a/python/mozbuild/mozbuild/test/python2.ini
++++ b/python/mozbuild/mozbuild/test/python2.ini
+@@ -8,12 +8,6 @@ skip-if = python == 3
+ [action/test_process_install_manifest.py]
+ [analyze/test_graph.py]
+ skip-if = (os == "win")
+-[backend/test_build.py]
+-[backend/test_configenvironment.py]
+-[backend/test_gn_processor.py]
+-[backend/test_partialconfigenvironment.py]
+-[backend/test_test_manifest.py]
+-[backend/test_visualstudio.py]
+ [codecoverage/test_lcov_rewrite.py]
+ [compilation/test_warnings.py]
+ [configure/lint.py]

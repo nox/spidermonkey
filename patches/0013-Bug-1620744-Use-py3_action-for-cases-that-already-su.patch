@@ -1,0 +1,261 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Mike Shal <mshal@mozilla.com>
+Date: Tue, 10 Mar 2020 20:19:13 +0000
+Subject: [PATCH] Bug 1620744 - Use py3_action for cases that already support
+ it; r=firefox-build-system-reviewers,rstewart
+
+Differential Revision: https://phabricator.services.mozilla.com/D65846
+
+--HG--
+extra : moz-landing-system : lando
+
+diff --git a/Makefile.in b/Makefile.in
+index c538c7e9824c..d9fbe4ca3535 100644
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -195,14 +195,14 @@ endif
+ .PHONY: symbolsfullarchive
+ symbolsfullarchive: prepsymbolsarchive
+ 	$(RM) '$(DIST)/$(PKG_PATH)$(SYMBOL_FULL_ARCHIVE_BASENAME).zip'
+-	$(call py_action,symbols_archive,'$(DIST)/$(PKG_PATH)$(SYMBOL_FULL_ARCHIVE_BASENAME).zip' \
++	$(call py3_action,symbols_archive,'$(DIST)/$(PKG_PATH)$(SYMBOL_FULL_ARCHIVE_BASENAME).zip' \
+                                      $(abspath $(DIST)/crashreporter-symbols) \
+                                      --full-archive)
+ 
+ .PHONY: symbolsarchive
+ symbolsarchive: prepsymbolsarchive
+ 	$(RM) '$(DIST)/$(PKG_PATH)$(SYMBOL_ARCHIVE_BASENAME).zip'
+-	$(call py_action,symbols_archive,'$(DIST)/$(PKG_PATH)$(SYMBOL_ARCHIVE_BASENAME).zip' \
++	$(call py3_action,symbols_archive,'$(DIST)/$(PKG_PATH)$(SYMBOL_ARCHIVE_BASENAME).zip' \
+                                      $(abspath $(DIST)/crashreporter-symbols))
+ 
+ ifdef MOZ_CRASHREPORTER
+diff --git a/browser/app/Makefile.in b/browser/app/Makefile.in
+index 7bf4adfaf322..f0fab52e5b32 100644
+--- a/browser/app/Makefile.in
++++ b/browser/app/Makefile.in
+@@ -56,7 +56,7 @@ endif
+ # steps. See bug 1431342.
+ libs:: $(srcdir)/profile/channel-prefs.js
+ 	$(NSINSTALL) -D $(DIST)/bin/defaults/pref
+-	$(call py_action,preprocessor,-Fsubstitution $(PREF_PPFLAGS) $(ACDEFINES) $^ -o $(DIST)/bin/defaults/pref/channel-prefs.js)
++	$(call py3_action,preprocessor,-Fsubstitution $(PREF_PPFLAGS) $(ACDEFINES) $^ -o $(DIST)/bin/defaults/pref/channel-prefs.js)
+ 
+ ifeq (cocoa,$(MOZ_WIDGET_TOOLKIT))
+ 
+diff --git a/browser/installer/Makefile.in b/browser/installer/Makefile.in
+index 07035b61986a..7f19366fe4ef 100644
+--- a/browser/installer/Makefile.in
++++ b/browser/installer/Makefile.in
+@@ -173,7 +173,7 @@ endif
+ 
+ package-compare::
+ 	cd $(DIST); find $(PKGCOMP_FIND_OPTS) '$(FINDPATH)' -type f | sort > bin-list.txt
+-	$(call py_action,preprocessor,$(DEFINES) $(ACDEFINES) $(MOZ_PKG_MANIFEST)) | grep '^$(BINPATH)' | sed -e 's/^\///' | sort > $(DIST)/pack-list.txt
++	$(call py3_action,preprocessor,$(DEFINES) $(ACDEFINES) $(MOZ_PKG_MANIFEST)) | grep '^$(BINPATH)' | sed -e 's/^\///' | sort > $(DIST)/pack-list.txt
+ 	-diff -u $(DIST)/pack-list.txt $(DIST)/bin-list.txt
+ 	rm -f $(DIST)/pack-list.txt $(DIST)/bin-list.txt
+ 
+diff --git a/browser/installer/windows/Makefile.in b/browser/installer/windows/Makefile.in
+index b51883db2018..610934d247b5 100644
+--- a/browser/installer/windows/Makefile.in
++++ b/browser/installer/windows/Makefile.in
+@@ -53,7 +53,7 @@ $(CONFIG_DIR)/setup.exe::
+ 	$(MKDIR) $(CONFIG_DIR)
+ 	$(INSTALL) $(addprefix $(srcdir)/,$(INSTALLER_FILES)) $(CONFIG_DIR)
+ 	$(INSTALL) $(addprefix $(topsrcdir)/$(MOZ_BRANDING_DIRECTORY)/,$(BRANDING_FILES)) $(CONFIG_DIR)
+-	$(call py_action,preprocessor,-Fsubstitution $(DEFINES) $(ACDEFINES) \
++	$(call py3_action,preprocessor,-Fsubstitution $(DEFINES) $(ACDEFINES) \
+ 	  $(srcdir)/nsis/defines.nsi.in -o $(CONFIG_DIR)/defines.nsi)
+ 	$(PYTHON) $(topsrcdir)/toolkit/mozapps/installer/windows/nsis/preprocess-locale.py \
+ 	  --preprocess-locale $(topsrcdir) \
+diff --git a/config/rules.mk b/config/rules.mk
+index f7c7a4ac6e6f..c6063c633271 100644
+--- a/config/rules.mk
++++ b/config/rules.mk
+@@ -963,7 +963,7 @@ ifndef MOZ_DEBUG
+ endif
+ endif
+ 	@echo 'Packaging $(XPI_PKGNAME).xpi...'
+-	$(call py_action,zip,-C $(FINAL_TARGET) ../$(XPI_PKGNAME).xpi '*')
++	$(call py3_action,zip,-C $(FINAL_TARGET) ../$(XPI_PKGNAME).xpi '*')
+ endif
+ 
+ # See comment above about moving this out of the tools tier.
+@@ -1143,7 +1143,7 @@ PP_TARGETS_ALL_RESULTS := $(sort $(foreach tier,$(PP_TARGETS_TIERS),$(PP_TARGETS
+ $(PP_TARGETS_ALL_RESULTS):
+ 	$(if $(filter-out $(notdir $@),$(notdir $(<:.in=))),$(error Looks like $@ has an unexpected dependency on $< which breaks PP_TARGETS))
+ 	$(RM) '$@'
+-	$(call py_action,preprocessor,--depend $(MDDEPDIR)/$(@F).pp $(PP_TARGET_FLAGS) $(DEFINES) $(ACDEFINES) '$<' -o '$@')
++	$(call py3_action,preprocessor,--depend $(MDDEPDIR)/$(@F).pp $(PP_TARGET_FLAGS) $(DEFINES) $(ACDEFINES) '$<' -o '$@')
+ 
+ $(filter %.css,$(PP_TARGETS_ALL_RESULTS)): PP_TARGET_FLAGS+=--marker %
+ 
+diff --git a/mobile/android/geckoview/src/androidTest/assets/moz.build b/mobile/android/geckoview/src/androidTest/assets/moz.build
+index 4e818a30e76e..0d6ef7aa3dc9 100644
+--- a/mobile/android/geckoview/src/androidTest/assets/moz.build
++++ b/mobile/android/geckoview/src/androidTest/assets/moz.build
+@@ -17,7 +17,6 @@ for addon in addons:
+ 
+     GENERATED_FILES += [xpi]
+     GENERATED_FILES[xpi].script = '../../../../../../toolkit/mozapps/extensions/test/create_xpi.py'
+-    GENERATED_FILES[xpi].py2 = True
+     GENERATED_FILES[xpi].inputs = [indir]
+ 
+     TEST_HARNESS_FILES.testing.mochitest.tests.junit += ['!%s' % xpi]
+diff --git a/mozglue/build/Makefile.in b/mozglue/build/Makefile.in
+index b25e1447101c..78c3847830dc 100644
+--- a/mozglue/build/Makefile.in
++++ b/mozglue/build/Makefile.in
+@@ -8,7 +8,7 @@ include $(topsrcdir)/config/config.mk
+ 
+ ifeq (WINNT,$(OS_TARGET))
+ mozglue.def: $(srcdir)/mozglue.def.in $(GLOBAL_DEPS)
+-	$(call py_action,preprocessor,$(if $(MOZ_REPLACE_MALLOC),-DMOZ_REPLACE_MALLOC) $(ACDEFINES) $< -o $@)
++	$(call py3_action,preprocessor,$(if $(MOZ_REPLACE_MALLOC),-DMOZ_REPLACE_MALLOC) $(ACDEFINES) $< -o $@)
+ 
+ GARBAGE += mozglue.def
+ 
+diff --git a/python/mozbuild/mozbuild/backend/recursivemake.py b/python/mozbuild/mozbuild/backend/recursivemake.py
+index d4b7308dd826..ab2a42ea530d 100644
+--- a/python/mozbuild/mozbuild/backend/recursivemake.py
++++ b/python/mozbuild/mozbuild/backend/recursivemake.py
+@@ -1571,13 +1571,13 @@ class RecursiveMakeBackend(MakeBackend):
+                                        mozpath.relpath(obj.path,
+                                                        obj.install_target))),
+             ]
+-            rule.add_commands(['$(call py_action,buildlist,%s)' %
++            rule.add_commands(['$(call py3_action,buildlist,%s)' %
+                                ' '.join(args)])
+         args = [
+             mozpath.join('$(DEPTH)', obj.path),
+             make_quote(shell_quote(str(obj.entry))),
+         ]
+-        rule.add_commands(['$(call py_action,buildlist,%s)' % ' '.join(args)])
++        rule.add_commands(['$(call py3_action,buildlist,%s)' % ' '.join(args)])
+         fragment.dump(backend_file.fh, removal_guard=False)
+ 
+         self._no_skip['misc'].add(obj.relsrcdir)
+@@ -1663,7 +1663,7 @@ class RecursiveMakeBackend(MakeBackend):
+             rule.add_dependencies([source])
+             rule.add_commands([
+                 '$(RM) $@',
+-                '$(call py_action,preprocessor,$(DEFINES) $(ACDEFINES) '
++                '$(call py3_action,preprocessor,$(DEFINES) $(ACDEFINES) '
+                 '$< -o $@)'
+             ])
+ 
+@@ -1718,7 +1718,7 @@ class RecursiveMakeBackend(MakeBackend):
+                 # static to preprocessed don't end up writing to a symlink,
+                 # which would modify content in the source directory.
+                 '$(RM) $@',
+-                '$(call py_action,preprocessor,$(DEFINES) $(ACDEFINES) '
++                '$(call py3_action,preprocessor,$(DEFINES) $(ACDEFINES) '
+                 '$< -o $@)'
+             ])
+ 
+diff --git a/python/mozbuild/mozbuild/test/backend/test_build.py b/python/mozbuild/mozbuild/test/backend/test_build.py
+index 395d5c2486b4..bf285d205c3a 100644
+--- a/python/mozbuild/mozbuild/test/backend/test_build.py
++++ b/python/mozbuild/mozbuild/test/backend/test_build.py
+@@ -26,6 +26,7 @@ from tempfile import mkdtemp
+ 
+ BASE_SUBSTS = [
+     ('PYTHON', mozpath.normsep(sys.executable)),
++    ('PYTHON3', mozpath.normsep(sys.executable)),
+     ('MOZ_UI_LOCALE', 'en-US'),
+ ]
+ 
+diff --git a/toolkit/mozapps/installer/packager.mk b/toolkit/mozapps/installer/packager.mk
+index 710618c67f51..5bb43ea60be5 100644
+--- a/toolkit/mozapps/installer/packager.mk
++++ b/toolkit/mozapps/installer/packager.mk
+@@ -203,14 +203,14 @@ endif
+ # and places it in dist/bin/res - it should be used when packaging a build.
+ multilocale.txt: LOCALES?=$(MOZ_CHROME_MULTILOCALE)
+ multilocale.txt:
+-	$(call py_action,file_generate,$(MOZILLA_DIR)/toolkit/locales/gen_multilocale.py main '$(MULTILOCALE_DIR)/multilocale.txt' $(MDDEPDIR)/multilocale.txt.pp '$(MULTILOCALE_DIR)/multilocale.txt' $(ALL_LOCALES))
++	$(call py3_action,file_generate,$(MOZILLA_DIR)/toolkit/locales/gen_multilocale.py main '$(MULTILOCALE_DIR)/multilocale.txt' $(MDDEPDIR)/multilocale.txt.pp '$(MULTILOCALE_DIR)/multilocale.txt' $(ALL_LOCALES))
+ 
+ # This version of the target uses AB_CD to build multilocale.txt and places it
+ # in the $(XPI_NAME)/res dir - it should be used when repackaging a build.
+ multilocale.txt-%: LOCALES?=$(AB_CD)
+ multilocale.txt-%: MULTILOCALE_DIR=$(DIST)/xpi-stage/$(XPI_NAME)/res
+ multilocale.txt-%:
+-	$(call py_action,file_generate,$(MOZILLA_DIR)/toolkit/locales/gen_multilocale.py main '$(MULTILOCALE_DIR)/multilocale.txt' $(MDDEPDIR)/multilocale.txt.pp '$(MULTILOCALE_DIR)/multilocale.txt' $(ALL_LOCALES))
++	$(call py3_action,file_generate,$(MOZILLA_DIR)/toolkit/locales/gen_multilocale.py main '$(MULTILOCALE_DIR)/multilocale.txt' $(MDDEPDIR)/multilocale.txt.pp '$(MULTILOCALE_DIR)/multilocale.txt' $(ALL_LOCALES))
+ 
+ locale-manifest.in: LOCALES?=$(MOZ_CHROME_MULTILOCALE)
+ locale-manifest.in: $(GLOBAL_DEPS) FORCE
+diff --git a/toolkit/mozapps/installer/upload-files.mk b/toolkit/mozapps/installer/upload-files.mk
+index 3d0159dd8bab..354869cc86aa 100644
+--- a/toolkit/mozapps/installer/upload-files.mk
++++ b/toolkit/mozapps/installer/upload-files.mk
+@@ -91,7 +91,7 @@ ifdef FUZZING_INTERFACES
+   JSSHELL_BINS += fuzz-tests$(BIN_SUFFIX)
+ endif
+ 
+-MAKE_JSSHELL  = $(call py_action,zip,-C $(DIST)/bin --strip $(abspath $(PKG_JSSHELL)) $(JSSHELL_BINS))
++MAKE_JSSHELL  = $(call py3_action,zip,-C $(DIST)/bin --strip $(abspath $(PKG_JSSHELL)) $(JSSHELL_BINS))
+ 
+ ifneq (,$(PGO_JARLOG_PATH))
+   # The backslash subst is to work around an issue with our version of mozmake,
+@@ -134,14 +134,14 @@ endif
+ 
+ ifeq ($(MOZ_PKG_FORMAT),ZIP)
+   PKG_SUFFIX	= .zip
+-  INNER_MAKE_PACKAGE = $(call py_action,make_zip,'$(MOZ_PKG_DIR)' '$(PACKAGE)')
+-  INNER_UNMAKE_PACKAGE = $(call py_action,make_unzip,$(UNPACKAGE))
++  INNER_MAKE_PACKAGE = $(call py3_action,make_zip,'$(MOZ_PKG_DIR)' '$(PACKAGE)')
++  INNER_UNMAKE_PACKAGE = $(call py3_action,make_unzip,$(UNPACKAGE))
+ endif
+ 
+ ifeq ($(MOZ_PKG_FORMAT),SFX7Z)
+   PKG_SUFFIX	= .exe
+-  INNER_MAKE_PACKAGE = $(call py_action,exe_7z_archive,'$(MOZ_PKG_DIR)' '$(MOZ_INSTALLER_PATH)/app.tag' '$(MOZ_SFX_PACKAGE)' '$(PACKAGE)')
+-  INNER_UNMAKE_PACKAGE = $(call py_action,exe_7z_extract,$(UNPACKAGE) $(MOZ_PKG_DIR))
++  INNER_MAKE_PACKAGE = $(call py3_action,exe_7z_archive,'$(MOZ_PKG_DIR)' '$(MOZ_INSTALLER_PATH)/app.tag' '$(MOZ_SFX_PACKAGE)' '$(PACKAGE)')
++  INNER_UNMAKE_PACKAGE = $(call py3_action,exe_7z_extract,$(UNPACKAGE) $(MOZ_PKG_DIR))
+ endif
+ 
+ #Create an RPM file
+@@ -231,7 +231,7 @@ ifeq ($(MOZ_PKG_FORMAT),DMG)
+   _ABS_MOZSRCDIR = $(shell cd $(MOZILLA_DIR) && pwd)
+   PKG_DMG_SOURCE = $(MOZ_PKG_DIR)
+   INNER_MAKE_PACKAGE = \
+-    $(call py_action,make_dmg, \
++    $(call py3_action,make_dmg, \
+         $(if $(MOZ_PKG_MAC_DSSTORE),--dsstore '$(MOZ_PKG_MAC_DSSTORE)') \
+         $(if $(MOZ_PKG_MAC_BACKGROUND),--background '$(MOZ_PKG_MAC_BACKGROUND)') \
+         $(if $(MOZ_PKG_MAC_ICON),--icon '$(MOZ_PKG_MAC_ICON)') \
+@@ -239,7 +239,7 @@ ifeq ($(MOZ_PKG_FORMAT),DMG)
+         '$(PKG_DMG_SOURCE)' '$(PACKAGE)' \
+         )
+   INNER_UNMAKE_PACKAGE = \
+-    $(call py_action,unpack_dmg, \
++    $(call py3_action,unpack_dmg, \
+         $(if $(MOZ_PKG_MAC_DSSTORE),--dsstore '$(MOZ_PKG_MAC_DSSTORE)') \
+         $(if $(MOZ_PKG_MAC_BACKGROUND),--background '$(MOZ_PKG_MAC_BACKGROUND)') \
+         $(if $(MOZ_PKG_MAC_ICON),--icon '$(MOZ_PKG_MAC_ICON)') \
+diff --git a/toolkit/mozapps/installer/windows/nsis/makensis.mk b/toolkit/mozapps/installer/windows/nsis/makensis.mk
+index b9e21cb7f8af..c954f31baf3b 100755
+--- a/toolkit/mozapps/installer/windows/nsis/makensis.mk
++++ b/toolkit/mozapps/installer/windows/nsis/makensis.mk
+@@ -96,7 +96,7 @@ $(CONFIG_DIR)/helper.exe: $(HELPER_DEPS)
+ 	$(MKDIR) $(CONFIG_DIR)
+ 	$(INSTALL) $(addprefix $(srcdir)/,$(INSTALLER_FILES)) $(CONFIG_DIR)
+ 	$(INSTALL) $(addprefix $(topsrcdir)/$(MOZ_BRANDING_DIRECTORY)/,$(BRANDING_FILES)) $(CONFIG_DIR)
+-	$(call py_action,preprocessor,-Fsubstitution $(DEFINES) $(ACDEFINES) \
++	$(call py3_action,preprocessor,-Fsubstitution $(DEFINES) $(ACDEFINES) \
+ 	  $(srcdir)/nsis/defines.nsi.in -o $(CONFIG_DIR)/defines.nsi)
+ 	$(PYTHON) $(topsrcdir)/toolkit/mozapps/installer/windows/nsis/preprocess-locale.py \
+ 	  --preprocess-locale $(topsrcdir) \
+@@ -115,7 +115,7 @@ maintenanceservice_installer::
+ 	$(MKDIR) $(CONFIG_DIR)
+ 	$(INSTALL) $(addprefix $(srcdir)/,$(INSTALLER_FILES)) $(CONFIG_DIR)
+ 	$(INSTALL) $(addprefix $(topsrcdir)/$(MOZ_BRANDING_DIRECTORY)/,$(BRANDING_FILES)) $(CONFIG_DIR)
+-	$(call py_action,preprocessor,-Fsubstitution $(DEFINES) $(ACDEFINES) \
++	$(call py3_action,preprocessor,-Fsubstitution $(DEFINES) $(ACDEFINES) \
+ 	  $(srcdir)/nsis/defines.nsi.in -o $(CONFIG_DIR)/defines.nsi)
+ 	$(PYTHON) $(topsrcdir)/toolkit/mozapps/installer/windows/nsis/preprocess-locale.py \
+ 	  --preprocess-locale $(topsrcdir) \

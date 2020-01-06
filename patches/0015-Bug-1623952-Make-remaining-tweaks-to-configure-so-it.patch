@@ -1,0 +1,79 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Ricky Stewart <rstewart@mozilla.com>
+Date: Fri, 20 Mar 2020 18:41:37 +0100
+Subject: [PATCH] Bug 1623952 - Make remaining tweaks to configure so it works
+ under macOS on Python 3
+
+
+diff --git a/build/moz.configure/init.configure b/build/moz.configure/init.configure
+index 84a53bbb39a3..a56b56f2c188 100644
+--- a/build/moz.configure/init.configure
++++ b/build/moz.configure/init.configure
+@@ -391,10 +391,11 @@ add_old_configure_assignment('PYTHON', virtualenv_python2)
+ def early_options():
+     @dependable
+     @imports('__sandbox__')
++    @imports(_from='six', _import='itervalues')
+     def early_options():
+         return set(
+             option.env
+-            for option in __sandbox__._options.itervalues()
++            for option in itervalues(__sandbox__._options)
+             if option.env
+         )
+     return early_options
+@@ -583,9 +584,14 @@ def virtualenv_python3(env_python, build_env, mozillabuild, mozconfig, help):
+             log.info('Re-executing in the virtualenv')
+             if env_python:
+                 del os.environ['PYTHON3']
++            env = dict(os.environ)
++            # Homebrew on macOS will change Python's sys.executable to a custom
++            # value which messes with mach's virtualenv handling code. Override
++            # Homebrew's changes with the correct sys.executable value.
++            env['PYTHONEXECUTABLE'] = python
+             # One would prefer to use os.execl, but that's completely borked on
+             # Windows.
+-            sys.exit(subprocess.call([python] + sys.argv))
++            sys.exit(subprocess.call([python] + sys.argv, env=env))
+ 
+         # We are now in the virtualenv
+         if not distutils.sysconfig.get_python_lib():
+diff --git a/build/moz.configure/old.configure b/build/moz.configure/old.configure
+index 842d989ed471..bac9a42f97f9 100644
+--- a/build/moz.configure/old.configure
++++ b/build/moz.configure/old.configure
+@@ -323,10 +323,10 @@ def prepare_configure_options(extra_old_configure_args, all_options, *options):
+ @imports('os')
+ @imports('subprocess')
+ @imports('sys')
+-@imports('types')
+ @imports(_from='mozbuild.shellutil', _import='quote')
+ @imports(_from='mozbuild.shellutil', _import='split')
+ @imports(_from='six', _import='exec_')
++@imports(_from='six', _import='string_types')
+ def old_configure(prepare_configure, prepare_configure_options, altered_path):
+     cmd = prepare_configure + prepare_configure_options.options
+     extra_env = prepare_configure_options.extra_env
+@@ -404,7 +404,7 @@ def old_configure(prepare_configure, prepare_configure_options, altered_path):
+ 
+     for c in ('substs', 'defines'):
+         raw_config[c] = [
+-            (k[1:-1], v[1:-1] if isinstance(v, types.StringTypes) else v)
++            (k[1:-1], v[1:-1] if isinstance(v, string_types) else v)
+             for k, v in raw_config[c]
+         ]
+ 
+@@ -427,11 +427,12 @@ def set_old_configure_define(name, value):
+ 
+ 
+ @depends(old_configure)
++@imports(_from='six', _import='iteritems')
+ def post_old_configure(raw_config):
+     for k, v in raw_config['substs']:
+         set_old_configure_config(k, v)
+ 
+-    for k, v in dict(raw_config['defines']).iteritems():
++    for k, v in iteritems(dict(raw_config['defines'])):
+         set_old_configure_define(k, v)
+ 
+     set_old_configure_config('non_global_defines',

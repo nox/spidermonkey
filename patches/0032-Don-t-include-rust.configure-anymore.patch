@@ -1,0 +1,19 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Anthony Ramine <nox@nox.paris>
+Date: Thu, 27 Feb 2020 15:08:15 +0100
+Subject: [PATCH] Don't include rust.configure anymore
+
+
+diff --git a/js/moz.configure b/js/moz.configure
+index dceeef4e15b2..24eecceeebd4 100644
+--- a/js/moz.configure
++++ b/js/moz.configure
+@@ -18,8 +18,6 @@ def building_js(build_project):
+ option(env='JS_STANDALONE', default=building_js,
+        help='Reserved for internal use')
+ 
+-include('../build/moz.configure/rust.configure',
+-        when='--enable-compile-environment')
+ include('../build/moz.configure/bindgen.configure',
+         when='--enable-compile-environment')
+ include('../build/moz.configure/lto-pgo.configure',

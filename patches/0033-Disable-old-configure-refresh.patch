@@ -1,0 +1,21 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Anthony Ramine <nox@nox.paris>
+Date: Fri, 20 Mar 2020 19:38:24 +0100
+Subject: [PATCH] Disable old-configure refresh
+
+This is the SM tarball so there is never anything to refresh, the
+generated old-configure script is versioned in the repository.
+
+diff --git a/build/moz.configure/old.configure b/build/moz.configure/old.configure
+index bac9a42f97f9..4d50a4b1b1a3 100644
+--- a/build/moz.configure/old.configure
++++ b/build/moz.configure/old.configure
+@@ -109,7 +109,7 @@ def prepare_configure(old_configure, mozillabuild, mozconfig, autoconf, build_en
+             old_configure = os.path.join(old_configure_dir, 'js', 'src',
+                                          os.path.basename(old_configure))
+ 
+-    refresh = True
++    refresh = False
+     if exists(old_configure):
+         mtime = getmtime(old_configure)
+         aclocal = os.path.join(build_env.topsrcdir, 'build', 'autoconf',

@@ -1,0 +1,9 @@
+diff a/js/src/build/moz.build b/js/src/build/moz.build	(rejected hunks)
+@@ -88,7 +88,6 @@ GeneratedFile(
+     py2=True,
+     inputs=[
+         '!%sjs_static.%s' % (CONFIG['LIB_PREFIX'], CONFIG['LIB_SUFFIX']),
+-        '/config/check_spidermonkey_style.py',
+         '/config/check_macroassembler_style.py',
+         '/config/check_js_opcode.py'
+         ])

@@ -1,0 +1,17 @@
+[package]
+name = "spidermonkey_workbench"
+version = "0.0.0"
+authors = ["Anthony Ramine <nox@nox.paris>"]
+edition = "2018"
+publish = false
+
+[dependencies]
+tempfile = "3.1"
+
+[workspace]
+default-members = [
+    "spidermonkey_src",
+]
+members = [
+    "spidermonkey_src",
+]

@@ -1,0 +1,31 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Anthony Ramine <nox@nox.paris>
+Date: Tue, 17 Mar 2020 14:03:52 +0000
+Subject: [PATCH] Bug 1623073 - Properly prefix ICU data symbol with GNU as
+ when needed; r=froydnj
+
+Differential Revision: https://phabricator.services.mozilla.com/D67148
+
+--HG--
+extra : moz-landing-system : lando
+
+diff --git a/config/external/icu/data/icudata_gas.S b/config/external/icu/data/icudata_gas.S
+index 7690ac9da851..6c9abc822c63 100644
+--- a/config/external/icu/data/icudata_gas.S
++++ b/config/external/icu/data/icudata_gas.S
+@@ -5,8 +5,13 @@
+ #if defined(__linux__) && defined(__ELF__)
+ .section .note.GNU-stack,"",%progbits
+ #endif
+-.global ICU_DATA_SYMBOL
++#ifdef PREFIX
++#  define DATA_SYMBOL _##ICU_DATA_SYMBOL
++#else
++#  define DATA_SYMBOL ICU_DATA_SYMBOL
++#endif
++.global DATA_SYMBOL
+ .data
+ .balign 16
+-ICU_DATA_SYMBOL:
++DATA_SYMBOL:
+         .incbin ICU_DATA_FILE
