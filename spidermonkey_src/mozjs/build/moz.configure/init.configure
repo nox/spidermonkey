@@ -253,6 +253,7 @@ option(env='PYTHON', nargs=1, help='Python 2.7 interpreter')
 @imports(_from='mozbuild.pythonutil', _import='python_executable_version')
 @imports(_from='six', _import='ensure_text')
 def virtualenv_python2(env_python, build_env, mozillabuild, mozconfig, help):
+    return
     if help:
         return
 
